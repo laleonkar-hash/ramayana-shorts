@@ -1,7 +1,15 @@
 name: Daily Ramayana Short
 
 on:
+
   workflow_dispatch:
+
+  schedule:
+    - cron: "0 9 * * *"
+      timezone: "Asia/Kolkata"
+
+permissions:
+  contents: write
 
 jobs:
 
@@ -11,28 +19,71 @@ jobs:
 
     steps:
 
+      # ------------------------------------------------
+      # 1. Download repository
+      # ------------------------------------------------
+
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # ------------------------------------------------
+      # 2. Install Python
+      # ------------------------------------------------
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+      # ------------------------------------------------
+      # 3. Install FFmpeg
+      # ------------------------------------------------
+
       - name: Install FFmpeg
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      - name: Install Python packages
+      # ------------------------------------------------
+      # 4. Install Python packages
+      # ------------------------------------------------
+
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run Ramayana Short
+      # ------------------------------------------------
+      # 5. Generate story, video and upload
+      # ------------------------------------------------
+
+      - name: Create and upload Ramayana Short
         env:
+
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+
         run: |
           python main.py
+
+      # ------------------------------------------------
+      # 6. Save next episode number
+      # ------------------------------------------------
+
+      - name: Save next episode
+        run: |
+
+          git config user.name "github-actions[bot]"
+
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add episode_state.json
+
+          git diff --cached --quiet || git commit -m "Update Ramayana episode state"
+
+          git push
