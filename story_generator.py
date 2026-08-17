@@ -13,11 +13,6 @@ from google import genai
 EPISODES_FILE = "ramayana_episodes.json"
 STATE_FILE = "episode_state.json"
 
-# Primary + fallback models.
-#
-# If one model temporarily returns 503,
-# the program retries and then moves to the next model.
-
 MODELS = [
     "gemini-3.6-flash",
     "gemini-3.5-flash",
@@ -146,12 +141,14 @@ def get_episode_source(item):
 
 
 # ============================================================
-# STATE
+# EPISODE STATE
 # ============================================================
 
 def load_state():
 
-    if not os.path.exists(STATE_FILE):
+    if not os.path.exists(
+        STATE_FILE
+    ):
 
         return 1
 
@@ -185,7 +182,9 @@ def load_state():
         return 1
 
 
-def save_state(next_episode):
+def save_state(
+    next_episode
+):
 
     state = {
         "next_episode": int(
@@ -257,7 +256,7 @@ def create_gemini_client():
 
 
 # ============================================================
-# GEMINI REQUEST WITH RETRIES + FALLBACKS
+# GEMINI WITH RETRY + FALLBACK
 # ============================================================
 
 def generate_with_fallback(
@@ -276,8 +275,10 @@ def generate_with_fallback(
         )
         print("=" * 60)
 
-        # Three attempts per model.
-        for attempt in range(1, 4):
+        for attempt in range(
+            1,
+            4
+        ):
 
             try:
 
@@ -306,7 +307,6 @@ def generate_with_fallback(
 
                 if text and text.strip():
 
-                    print()
                     print(
                         f"SUCCESS: {model}"
                     )
@@ -336,18 +336,31 @@ def generate_with_fallback(
                 )
 
                 temporary_error = (
+
                     "503" in error_text
+
                     or
+
                     "UNAVAILABLE" in error_text
+
                     or
+
                     "429" in error_text
+
                     or
+
                     "RESOURCE_EXHAUSTED" in error_text
+
                     or
+
                     "500" in error_text
+
                     or
+
                     "502" in error_text
+
                     or
+
                     "504" in error_text
                 )
 
@@ -355,10 +368,6 @@ def generate_with_fallback(
 
                     wait_seconds = (
                         5 * attempt
-                    )
-
-                    print(
-                        f"Temporary error."
                     )
 
                     print(
@@ -372,10 +381,6 @@ def generate_with_fallback(
 
                     continue
 
-                # Authentication, invalid API key,
-                # invalid model, etc.
-                #
-                # These should not be endlessly retried.
                 raise RuntimeError(
                     f"Gemini API request failed: "
                     f"{error}"
@@ -387,7 +392,7 @@ def generate_with_fallback(
         )
 
         print(
-            "Moving to fallback model..."
+            "Trying fallback model..."
         )
 
     raise RuntimeError(
@@ -397,10 +402,12 @@ def generate_with_fallback(
 
 
 # ============================================================
-# GENERATE STORY
+# GENERATE FULL MARATHI STORY
 # ============================================================
 
-def generate_story(episode):
+def generate_story(
+    episode
+):
 
     client = create_gemini_client()
 
@@ -421,93 +428,133 @@ def generate_story(episode):
     )
 
     prompt = f"""
-You are an expert storyteller specializing
-in the Ramayana.
+तुम्ही रामायणातील कथा सांगणारे
+एक उत्कृष्ट मराठी कथाकार आहात.
 
-You are creating one daily YouTube Short.
+दररोज एका रामायणाच्या भागावर आधारित
+YouTube Short तयार करायचा आहे.
 
-TODAY:
+आजची तारीख:
 {today}
 
-EPISODE NUMBER:
+भाग क्रमांक:
 {episode_number}
 
-EPISODE TITLE:
+भागाचे शीर्षक:
 {episode_title}
 
-SOURCE INFORMATION:
+या भागाची संपूर्ण माहिती:
 {source_story}
 
 
-TASK:
+तुमचे काम:
 
-Create a UNIQUE narration for a
-25–30 second YouTube Short.
-
-
-STRICT RULES:
-
-1. Stay faithful to the supplied Ramayana source.
-
-2. Do not invent major events.
-
-3. Do not invent characters.
-
-4. Do not change character relationships.
-
-5. Do not combine this episode with another episode.
-
-6. Do not introduce events that belong to later episodes.
-
-7. Do not contradict the supplied source.
-
-8. Use simple natural English.
-
-9. Make the first sentence an interesting hook.
-
-10. The STORY should contain approximately
-    55–65 words.
-
-11. Make it sound natural when spoken aloud.
-
-12. Do not use bullet points.
-
-13. Do not use numbered points.
-
-14. Do not use emojis.
-
-15. Do not mention AI, Gemini, automation,
-    scripts or prompts.
-
-16. Do not write "according to the source".
-
-17. Do not put headings inside STORY.
-
-18. Keep the story respectful.
-
-19. Make the wording fresh and engaging.
-    Do not simply copy the source text.
-
-20. End with a small curiosity or continuation
-    feeling.
-
-21. The story must remain focused on THIS episode.
-
-22. Do not add unrelated mythology.
+वरील माहितीच्या आधारावर या भागाची
+एक पूर्ण, सुंदर आणि भावनिक कथा तयार करा.
 
 
-RETURN EXACTLY:
+अत्यंत महत्त्वाचे नियम:
+
+1. संपूर्ण कथा फक्त मराठी भाषेत लिहा.
+
+2. कथा नैसर्गिक, शुद्ध आणि बोलण्यासाठी
+   योग्य मराठीत असावी.
+
+3. कथा केवळ सारांशासारखी वाटता कामा नये.
+
+4. प्रेक्षकांना असे वाटले पाहिजे की त्यांनी
+   त्या प्रसंगाची पूर्ण कथा ऐकली आहे.
+
+5. कथेमध्ये स्पष्ट सुरुवात असावी.
+
+6. त्यानंतर मुख्य घटना क्रमाने सांगावी.
+
+7. कथेमध्ये मुख्य पात्रे आणि त्यांची भूमिका
+   स्पष्ट असावी.
+
+8. मुख्य घटना घडल्यानंतर त्याचा परिणाम
+   किंवा भावनिक शेवट सांगावा.
+
+9. कथा अचानक थांबवू नका.
+
+10. या भागातील महत्त्वाची घटना वगळू नका.
+
+11. दुसऱ्या रामायणाच्या भागातील घटना
+    या कथेमध्ये मिसळू नका.
+
+12. पुढील भागातील घटना आधीच सांगू नका.
+
+13. रामायणातील पात्रांची नावे आणि
+    नातेसंबंध चुकीचे लिहू नका.
+
+14. स्वतःहून मोठ्या किंवा महत्त्वाच्या
+    घटना निर्माण करू नका.
+
+15. दिलेल्या स्रोताच्या विरोधात कोणतीही
+    माहिती लिहू नका.
+
+16. इंग्रजी शब्दांचा अनावश्यक वापर करू नका.
+
+17. "AI", "Gemini", "script", "prompt",
+    "source" किंवा automation यांचा
+    उल्लेख करू नका.
+
+18. कथा YouTube Shorts साठी आकर्षक असावी.
+
+19. पहिल्या वाक्यात आकर्षक सुरुवात करा.
+
+20. कथा ऐकताना भावनिक आणि चित्रमय
+    अनुभव मिळाला पाहिजे.
+
+21. शेवट नैसर्गिक असावा.
+
+22. शेवटी पुढील भागाबद्दल उत्सुकता
+    निर्माण करणारे एक छोटे वाक्य असू शकते,
+    पण पुढील भागाची घटना सांगू नका.
+
+23. कथा साधारण 75 ते 90 मराठी शब्दांची असावी.
+
+24. केवळ शब्दसंख्या पूर्ण करण्यासाठी
+    महत्त्वहीन वाक्ये जोडू नका.
+
+25. कथा लहान करण्यासाठी मुख्य घटना
+    घाईघाईने एकत्र करू नका.
+
+26. शक्य तितकी पूर्ण आणि सलग कथा सांगा.
+
+27. कथा फक्त दिलेल्या रामायणाच्या
+    भागावर आधारित असावी.
+
+
+कथेची रचना:
+
+सुरुवात:
+प्रसंग आणि परिस्थिती स्पष्ट करा.
+
+मध्य:
+मुख्य घटना नैसर्गिक क्रमाने सांगा.
+
+शेवट:
+मुख्य घटनेचा परिणाम आणि भावनिक
+समारोप सांगा.
+
+
+OUTPUT EXACTLY:
 
 TITLE:
-<short engaging title>
+<मराठी YouTube Shorts शीर्षक>
 
 STORY:
-<55–65 word narration>
+<पूर्ण मराठी कथा>
+
+
+TITLE आणि STORY व्यतिरिक्त काहीही लिहू नका.
 """
+
 
     print()
     print("=" * 60)
-    print("ASKING GEMINI TO CREATE STORY")
+    print("GEMINI MARATHI STORY GENERATION")
     print("=" * 60)
 
     print(
@@ -516,11 +563,20 @@ STORY:
     )
 
     print(
-        "Title:",
+        "Episode:",
         episode_title
     )
 
+    print(
+        "Language: Marathi"
+    )
+
+    print(
+        "Story type: Full mini-story"
+    )
+
     print("=" * 60)
+
 
     response = generate_with_fallback(
         client,
@@ -535,6 +591,7 @@ STORY:
             "Gemini returned an empty story."
         )
 
+
     print()
     print("=" * 60)
     print("RAW GEMINI RESPONSE")
@@ -544,11 +601,13 @@ STORY:
 
     print("=" * 60)
 
+
     # ========================================================
-    # PARSE RESPONSE
+    # PARSE TITLE + STORY
     # ========================================================
 
     title = ""
+
     story_lines = []
 
     collecting_story = False
@@ -563,7 +622,11 @@ STORY:
 
         upper = clean.upper()
 
-        if upper.startswith("TITLE:"):
+        if (
+            upper.startswith("TITLE:")
+            or
+            upper.startswith("TITLE :")
+        ):
 
             title = clean.split(
                 ":",
@@ -572,7 +635,14 @@ STORY:
 
             collecting_story = False
 
-        elif upper.startswith("STORY:"):
+            continue
+
+
+        if (
+            upper.startswith("STORY:")
+            or
+            upper.startswith("STORY :")
+        ):
 
             first_part = clean.split(
                 ":",
@@ -587,11 +657,15 @@ STORY:
 
             collecting_story = True
 
-        elif collecting_story:
+            continue
+
+
+        if collecting_story:
 
             story_lines.append(
                 clean
             )
+
 
     story = " ".join(
         story_lines
@@ -605,13 +679,15 @@ STORY:
         title.split()
     )
 
+
     # ========================================================
-    # FALLBACK PARSING
+    # FALLBACK
     # ========================================================
 
     if not title:
 
         title = episode_title
+
 
     if not story:
 
@@ -631,13 +707,18 @@ STORY:
                 story.split()
             )
 
+
     if not story:
 
         raise RuntimeError(
-            "Could not extract story from Gemini."
+            "Could not extract story "
+            "from Gemini response."
         )
 
-    # Remove accidental wrapping quotes.
+
+    # ========================================================
+    # CLEAN STORY
+    # ========================================================
 
     if (
         story.startswith('"')
@@ -645,7 +726,10 @@ STORY:
         story.endswith('"')
     ):
 
-        story = story[1:-1].strip()
+        story = story[
+            1:-1
+        ].strip()
+
 
     if (
         story.startswith("'")
@@ -653,9 +737,10 @@ STORY:
         story.endswith("'")
     ):
 
-        story = story[1:-1].strip()
+        story = story[
+            1:-1
+        ].strip()
 
-    # Remove accidental repeated STORY prefix.
 
     if story.upper().startswith(
         "STORY:"
@@ -666,6 +751,7 @@ STORY:
             1
         )[1].strip()
 
+
     # ========================================================
     # WORD COUNT
     # ========================================================
@@ -674,9 +760,10 @@ STORY:
         story.split()
     )
 
+
     print()
     print("=" * 60)
-    print("GEMINI STORY GENERATED")
+    print("MARATHI STORY GENERATED")
     print("=" * 60)
 
     print(
@@ -690,21 +777,28 @@ STORY:
     )
 
     print()
-    print(story)
+
+    print(
+        story
+    )
 
     print("=" * 60)
 
-    if word_count < 45:
+
+    if word_count < 60:
 
         print(
-            "WARNING: Story is shorter than expected."
+            "WARNING: Story may be too short."
         )
 
-    if word_count > 75:
+
+    if word_count > 110:
 
         print(
-            "WARNING: Story is longer than expected."
+            "WARNING: Story may be too long "
+            "for a 30-second narration."
         )
+
 
     return {
         "episode": episode_number,
@@ -725,8 +819,7 @@ def get_next_episode():
     if not episodes:
 
         raise RuntimeError(
-            "No episodes found in "
-            "ramayana_episodes.json."
+            "No episodes found."
         )
 
     next_number = load_state()
@@ -746,8 +839,9 @@ def get_next_episode():
         next_number
     )
 
+
     # If episode doesn't exist,
-    # restart from the first episode.
+    # restart from first episode.
 
     if episode is None:
 
@@ -770,12 +864,13 @@ def get_next_episode():
 
                 continue
 
+
         if not valid_numbers:
 
             raise RuntimeError(
-                "No valid episode numbers "
-                "found."
+                "No valid episode numbers found."
             )
+
 
         first_number = min(
             valid_numbers
@@ -786,11 +881,13 @@ def get_next_episode():
             first_number
         )
 
+
     if episode is None:
 
         raise RuntimeError(
             "Could not select episode."
         )
+
 
     selected_number = get_episode_number(
         episode
@@ -799,6 +896,7 @@ def get_next_episode():
     selected_title = get_episode_title(
         episode
     )
+
 
     print()
     print(
@@ -813,7 +911,6 @@ def get_next_episode():
 
     print("=" * 60)
 
-    # Generate unique Gemini story.
 
     return generate_story(
         episode
@@ -830,7 +927,7 @@ if __name__ == "__main__":
 
     print()
     print("=" * 60)
-    print("FINAL STORY")
+    print("FINAL MARATHI STORY")
     print("=" * 60)
 
     print(
