@@ -25,16 +25,19 @@ def get_youtube():
     )
 
     if not client_id:
+
         raise RuntimeError(
             "YOUTUBE_CLIENT_ID is missing."
         )
 
     if not client_secret:
+
         raise RuntimeError(
             "YOUTUBE_CLIENT_SECRET is missing."
         )
 
     if not refresh_token:
+
         raise RuntimeError(
             "YOUTUBE_REFRESH_TOKEN is missing."
         )
@@ -71,14 +74,10 @@ def upload_video(
     description = (
         f"Ramayana Episode "
         f"{episode['episode']}\n\n"
-
         f"{episode['title']}\n\n"
-
         f"{episode['story']}\n\n"
-
         "Follow the Ramayana journey "
         "through a new short story every day.\n\n"
-
         "#Ramayana #LordRama #Sita "
         "#RamayanaStories #IndianMythology #Shorts"
     )
@@ -114,6 +113,12 @@ def upload_video(
         }
     }
 
+    if not os.path.exists(video_file):
+
+        raise RuntimeError(
+            f"Video file not found: {video_file}"
+        )
+
     media = MediaFileUpload(
         video_file,
         mimetype="video/mp4",
@@ -135,28 +140,42 @@ def upload_video(
 
     while response is None:
 
-        status, response = request.next_chunk()
+        status, response = (
+            request.next_chunk()
+        )
 
         if status:
 
             print(
                 "Upload:",
-                int(status.progress() * 100),
+                int(
+                    status.progress() * 100
+                ),
                 "%"
             )
 
     video_id = response["id"]
 
     url = (
-        f"https://www.youtube.com/shorts/{video_id}"
+        "https://www.youtube.com/shorts/"
+        f"{video_id}"
     )
 
     print()
     print("=" * 60)
     print("YOUTUBE UPLOAD SUCCESSFUL")
     print("=" * 60)
-    print("Video ID:", video_id)
-    print("URL:", url)
+
+    print(
+        "Video ID:",
+        video_id
+    )
+
+    print(
+        "URL:",
+        url
+    )
+
     print("=" * 60)
 
     return url
