@@ -4,9 +4,12 @@ import subprocess
 import textwrap
 
 import edge_tts
-
 from PIL import Image, ImageDraw, ImageFont
 
+
+# ============================================================
+# CONFIGURATION
+# ============================================================
 
 OUTPUT_DIR = "output"
 TEMP_DIR = "temp"
@@ -15,6 +18,9 @@ WIDTH = 1080
 HEIGHT = 1920
 
 TARGET_DURATION = 30.0
+
+# Marathi female voice
+TTS_VOICE = "mr-IN-AarohiNeural"
 
 
 # ============================================================
@@ -58,7 +64,7 @@ def get_font(size):
 
 
 # ============================================================
-# CREATE IMAGE SCENE
+# CREATE VISUAL SCENE
 # ============================================================
 
 def create_scene(
@@ -97,7 +103,7 @@ def create_scene(
         width=5
     )
 
-    # Decorative circle
+    # Decorative circles
 
     draw.ellipse(
         (
@@ -121,7 +127,7 @@ def create_scene(
         width=3
     )
 
-    # Om
+    # Om symbol
 
     draw.text(
         (
@@ -147,7 +153,7 @@ def create_scene(
         anchor="mm"
     )
 
-    # Episode
+    # Episode number
 
     draw.text(
         (
@@ -205,6 +211,67 @@ def create_scene(
 
 
 # ============================================================
+# STORY VALIDATION
+# ============================================================
+
+def validate_story(text):
+
+    if text is None:
+
+        raise RuntimeError(
+            "Story is empty."
+        )
+
+    text = str(text).strip()
+
+    # Remove whitespace
+
+    cleaned = " ".join(
+        text.split()
+    )
+
+    # Reject punctuation-only stories
+
+    meaningful_characters = [
+        c for c in cleaned
+        if c.isalnum()
+        or
+        ("\u0900" <= c <= "\u097F")
+    ]
+
+    if len(meaningful_characters) < 20:
+
+        raise RuntimeError(
+            "Generated story is invalid or too short. "
+            f"Received: {repr(text)}"
+        )
+
+    words = cleaned.split()
+
+    if len(words) < 20:
+
+        raise RuntimeError(
+            "Generated story contains too few words. "
+            f"Only {len(words)} words were received."
+        )
+
+    # Explicitly reject the problem we saw
+
+    if cleaned in [
+        ".",
+        "।",
+        "...",
+        "...."
+    ]:
+
+        raise RuntimeError(
+            "Story contains only punctuation."
+        )
+
+    return cleaned
+
+
+# ============================================================
 # TEXT TO SPEECH
 # ============================================================
 
@@ -216,8 +283,13 @@ async def generate_voice(
 
     communicate = edge_tts.Communicate(
         text=text,
-        voice="en-IN-NeerjaNeural",
+
+        # IMPORTANT:
+        # Marathi voice
+        voice=TTS_VOICE,
+
         rate="+0%",
+
         volume="+0%"
     )
 
@@ -231,6 +303,38 @@ def generate_audio(text):
 
     ensure_directories()
 
+    # --------------------------------------------------------
+    # Validate BEFORE TTS
+    # --------------------------------------------------------
+
+    text = validate_story(
+        text
+    )
+
+    print()
+    print("=" * 60)
+    print("MARATHI TEXT TO SPEECH")
+    print("=" * 60)
+
+    print(
+        "Voice:",
+        TTS_VOICE
+    )
+
+    print(
+        "Story word count:",
+        len(text.split())
+    )
+
+    print()
+    print(
+        "Story:"
+    )
+
+    print(text)
+
+    print("=" * 60)
+
     audio_file = os.path.join(
         OUTPUT_DIR,
         "narration.mp3"
@@ -241,18 +345,38 @@ def generate_audio(text):
         "narration.srt"
     )
 
+    # Remove old files
+
+    for filename in [
+        audio_file,
+        subtitle_file
+    ]:
+
+        if os.path.exists(filename):
+
+            os.remove(filename)
+
     print()
     print(
-        "Generating voice narration..."
+        "Generating Marathi narration..."
     )
 
-    asyncio.run(
-        generate_voice(
-            text,
-            audio_file,
-            subtitle_file
+    try:
+
+        asyncio.run(
+            generate_voice(
+                text,
+                audio_file,
+                subtitle_file
+            )
         )
-    )
+
+    except Exception as error:
+
+        raise RuntimeError(
+            "Marathi TTS generation failed: "
+            f"{error}"
+        ) from error
 
     if not os.path.exists(
         audio_file
@@ -262,9 +386,29 @@ def generate_audio(text):
             "Edge TTS did not create narration.mp3"
         )
 
-    print(
-        "Narration created:",
+    duration = get_duration(
         audio_file
+    )
+
+    print(
+        f"Generated narration duration: "
+        f"{duration:.2f} seconds"
+    )
+
+    # A real 20+ word story should never be
+    # only a few seconds.
+
+    if duration < 5:
+
+        raise RuntimeError(
+            "Narration is suspiciously short "
+            f"({duration:.2f} seconds). "
+            "The pipeline will stop instead of "
+            "uploading a bad video."
+        )
+
+    print(
+        "Marathi narration created successfully."
     )
 
     return (
@@ -297,13 +441,19 @@ def get_duration(audio_file):
         check=True
     )
 
-    return float(
-        result.stdout.strip()
-    )
+    value = result.stdout.strip()
+
+    if not value:
+
+        raise RuntimeError(
+            "Could not determine audio duration."
+        )
+
+    return float(value)
 
 
 # ============================================================
-# MAKE AUDIO APPROXIMATELY 30 SECONDS
+# ADJUST NARRATION
 # ============================================================
 
 def make_audio_30_seconds(
@@ -320,29 +470,47 @@ def make_audio_30_seconds(
         f"{duration:.2f} seconds"
     )
 
+    # --------------------------------------------------------
+    # If narration is shorter than 30 sec:
+    #
+    # DO NOT speed it up.
+    #
+    # We keep the natural Marathi narration speed.
+    # The video will be extended to 30 sec.
+    # --------------------------------------------------------
+
     if duration <= TARGET_DURATION:
 
-        speed = 1.0
-
-    else:
-
-        speed = (
-            duration /
-            TARGET_DURATION
+        print(
+            "Narration is shorter than 30 seconds."
         )
 
-    # Keep voice speed within reasonable limits.
-
-    speed = max(
-        1.0,
-        min(
-            2.0,
-            speed
+        print(
+            "Keeping natural Marathi speaking speed."
         )
+
+        return audio_file
+
+    # --------------------------------------------------------
+    # If narration is longer than 30 sec:
+    # Slightly increase speaking speed.
+    # --------------------------------------------------------
+
+    speed = (
+        duration /
+        TARGET_DURATION
+    )
+
+    # Don't make Marathi narration unnaturally fast.
+
+    speed = min(
+        speed,
+        1.25
     )
 
     print(
-        f"Voice speed: {speed:.3f}x"
+        f"Adjusting narration speed to "
+        f"{speed:.3f}x"
     )
 
     adjusted_audio = os.path.join(
@@ -369,10 +537,6 @@ def make_audio_30_seconds(
         adjusted_audio
     ]
 
-    print(
-        "Adjusting narration..."
-    )
-
     subprocess.run(
         command,
         check=True
@@ -391,7 +555,7 @@ def make_audio_30_seconds(
 
 
 # ============================================================
-# CREATE SCENES FILE
+# CREATE CONCAT FILE
 # ============================================================
 
 def create_scenes_file(
@@ -405,7 +569,7 @@ def create_scenes_file(
     )
 
     scene_duration = (
-        duration /
+        TARGET_DURATION /
         len(scene_files)
     )
 
@@ -421,12 +585,6 @@ def create_scenes_file(
                 scene_file
             )
 
-            # FFmpeg concat files can have
-            # problems with certain characters.
-            #
-            # Our generated filenames are simple,
-            # so this is safe.
-
             f.write(
                 f"file '{absolute_path}'\n"
             )
@@ -435,8 +593,7 @@ def create_scenes_file(
                 f"duration {scene_duration:.6f}\n"
             )
 
-        # FFmpeg concat demuxer needs the last
-        # file repeated.
+        # Repeat last frame
 
         last_file = os.path.abspath(
             scene_files[-1]
@@ -453,46 +610,64 @@ def create_scenes_file(
 # CREATE FINAL VIDEO
 # ============================================================
 
-def create_video(episode):
+def create_video(
+    episode
+):
 
     ensure_directories()
 
     print()
     print("=" * 60)
-    print("CREATING RAMAYANA SHORT")
+    print("CREATING RAMAYANA MARATHI SHORT")
     print("=" * 60)
 
     # --------------------------------------------------------
-    # 1. Generate narration
+    # Story
     # --------------------------------------------------------
 
-    audio_file, subtitle_file = generate_audio(
-        episode["story"]
+    story = episode.get(
+        "story",
+        ""
+    )
+
+    title = episode.get(
+        "title",
+        "रामायण कथा"
+    )
+
+    episode_number = episode.get(
+        "episode",
+        1
     )
 
     # --------------------------------------------------------
-    # 2. Adjust audio
+    # Generate Marathi narration
+    # --------------------------------------------------------
+
+    audio_file, subtitle_file = generate_audio(
+        story
+    )
+
+    # --------------------------------------------------------
+    # Adjust narration
     # --------------------------------------------------------
 
     adjusted_audio = make_audio_30_seconds(
         audio_file
     )
 
-    # --------------------------------------------------------
-    # 3. Determine duration
-    # --------------------------------------------------------
-
-    duration = get_duration(
+    narration_duration = get_duration(
         adjusted_audio
     )
 
+    print()
     print(
-        f"Final audio duration: "
-        f"{duration:.2f} seconds"
+        f"Narration duration: "
+        f"{narration_duration:.2f} seconds"
     )
 
     # --------------------------------------------------------
-    # 4. Create scenes
+    # Create scenes
     # --------------------------------------------------------
 
     print()
@@ -508,8 +683,8 @@ def create_video(episode):
     ):
 
         scene_file = create_scene(
-            episode["title"],
-            episode["episode"],
+            title,
+            episode_number,
             scene_number
         )
 
@@ -518,21 +693,16 @@ def create_video(episode):
         )
 
     # --------------------------------------------------------
-    # 5. Create concat file
+    # Create concat file
     # --------------------------------------------------------
 
     concat_file = create_scenes_file(
         scene_files,
-        duration
-    )
-
-    print(
-        "Scenes file:",
-        concat_file
+        TARGET_DURATION
     )
 
     # --------------------------------------------------------
-    # 6. Final output
+    # Final video
     # --------------------------------------------------------
 
     output_file = os.path.join(
@@ -540,15 +710,9 @@ def create_video(episode):
         "final_short.mp4"
     )
 
-    # ========================================================
     # IMPORTANT:
-    #
-    # NO SUBTITLE FILTER HERE.
-    #
-    # We are intentionally removing subtitles for now.
-    # First we need to make sure FFmpeg successfully creates
-    # the video.
-    # ========================================================
+    # Subtitles are intentionally NOT burned in here.
+    # This avoids the previous FFmpeg subtitle error.
 
     command = [
         "ffmpeg",
@@ -608,66 +772,22 @@ def create_video(episode):
     print("RUNNING FFMPEG")
     print("=" * 60)
 
-    print(
-        "Creating:",
-        output_file
-    )
-
-    print(
-        "Resolution:",
-        "1080x1920"
-    )
-
-    print(
-        "Subtitles:",
-        "TEMPORARILY DISABLED"
-    )
-
-    print("=" * 60)
-
     try:
 
-        result = subprocess.run(
+        subprocess.run(
             command,
-            check=True,
-            capture_output=True,
-            text=True
+            check=True
         )
 
     except subprocess.CalledProcessError as error:
 
-        print()
-        print("=" * 60)
-        print("FFMPEG FAILED")
-        print("=" * 60)
-
-        print(
-            "Exit code:",
-            error.returncode
-        )
-
-        print()
-        print(
-            "FFmpeg output:"
-        )
-
-        print(
-            error.stdout
-        )
-
-        print(
-            error.stderr
-        )
-
-        print("=" * 60)
-
         raise RuntimeError(
             "FFmpeg failed while creating "
-            "the video."
+            "the final video."
         ) from error
 
     # --------------------------------------------------------
-    # 7. Verify output
+    # Verify output
     # --------------------------------------------------------
 
     if not os.path.exists(
@@ -675,8 +795,7 @@ def create_video(episode):
     ):
 
         raise RuntimeError(
-            "FFmpeg finished but final_short.mp4 "
-            "was not created."
+            "final_short.mp4 was not created."
         )
 
     file_size = os.path.getsize(
@@ -686,8 +805,7 @@ def create_video(episode):
     if file_size < 10000:
 
         raise RuntimeError(
-            "final_short.mp4 was created but "
-            "the file appears to be invalid."
+            "final_short.mp4 appears to be invalid."
         )
 
     print()
@@ -701,13 +819,15 @@ def create_video(episode):
     )
 
     print(
-        "Size:",
-        f"{file_size / 1024 / 1024:.2f} MB"
+        f"Size: {file_size / 1024 / 1024:.2f} MB"
     )
 
     print(
-        "Resolution:",
-        "1080x1920"
+        "Resolution: 1080x1920"
+    )
+
+    print(
+        "Audio: Marathi"
     )
 
     print("=" * 60)
