@@ -1,9 +1,8 @@
-import os
-import shutil
-
 from story_generator import (
     get_next_episode,
-    save_episode_state
+    load_episodes,
+    save_state,
+    get_episode_number
 )
 
 from video_creator import create_video
@@ -14,63 +13,91 @@ from youtube_uploader import upload_video
 def main():
 
     print()
-    print("=" * 60)
-    print("DAILY RAMAYANA SHORT")
-    print("=" * 60)
+    print("=" * 70)
+    print("        DAILY RAMAYANA SHORT GENERATOR")
+    print("=" * 70)
 
+    # 1. Select episode + generate unique Gemini story.
     episode = get_next_episode()
 
     print()
-    print("Episode:", episode["episode"])
-    print("Title:", episode["title"])
+    print("Selected episode:")
+    print(
+        episode["episode"],
+        "-",
+        episode["title"]
+    )
+
+    # 2. Create video.
+    video_file = create_video(
+        episode
+    )
+
+    # 3. Upload to YouTube.
+    youtube_url = upload_video(
+        video_file,
+        episode
+    )
+
+    # 4. Only after successful upload,
+    #    advance to the next episode.
+    episodes = load_episodes()
+
+    episode_numbers = [
+        get_episode_number(item)
+        for item in episodes
+    ]
+
+    current = episode["episode"]
+
+    larger = [
+        number
+        for number in episode_numbers
+        if number > current
+    ]
+
+    if larger:
+
+        next_episode = min(
+            larger
+        )
+
+    else:
+
+        next_episode = min(
+            episode_numbers
+        )
+
+    save_state(
+        next_episode
+    )
+
     print()
+    print("=" * 70)
+    print("       DAILY RAMAYANA SHORT COMPLETE")
+    print("=" * 70)
 
-    print("Narration:")
-    print(episode["narration"])
-    print()
+    print(
+        "Episode:",
+        episode["episode"]
+    )
 
-    try:
+    print(
+        "Title:",
+        episode["title"]
+    )
 
-        video_file = create_video(
-            episode
-        )
+    print(
+        "YouTube:",
+        youtube_url
+    )
 
-        print()
-        print("Video generation complete.")
-        print(video_file)
-        print()
+    print(
+        "Next episode:",
+        next_episode
+    )
 
-        youtube_url = upload_video(
-            video_file,
-            episode
-        )
-
-        # Save state ONLY after successful YouTube upload.
-        save_episode_state(
-            episode["episode"]
-        )
-
-        print()
-        print("=" * 60)
-        print("DAILY RAMAYANA SHORT COMPLETE")
-        print("=" * 60)
-        print()
-        print("Episode:", episode["episode"])
-        print("YouTube:", youtube_url)
-        print()
-
-    except Exception as error:
-
-        print()
-        print("=" * 60)
-        print("PIPELINE FAILED")
-        print("=" * 60)
-        print()
-        print(type(error).__name__)
-        print(str(error))
-        print()
-
-        raise
+    print("=" * 70)
 
 
 if __name__ == "__main__":
