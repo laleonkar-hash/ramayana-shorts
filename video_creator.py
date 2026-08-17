@@ -20,6 +20,8 @@ RAM_IMAGE = os.path.join(
 TARGET_WIDTH = 1080
 TARGET_HEIGHT = 1920
 
+# Used only as a preferred target.
+# The actual video duration follows the FULL narration.
 TARGET_DURATION = 30.0
 
 # Marathi female voice
@@ -44,20 +46,17 @@ def ensure_directories():
 
 
 # ============================================================
-# CHECK REQUIRED FILES
+# CHECK RAM IMAGE
 # ============================================================
 
 def check_ram_image():
 
-    if not os.path.exists(
-        RAM_IMAGE
-    ):
+    if not os.path.exists(RAM_IMAGE):
 
         raise RuntimeError(
             "Lord Rama image was not found.\n"
             f"Expected file: {RAM_IMAGE}\n\n"
-            "Please make sure your GitHub repository "
-            "contains:\n"
+            "Make sure your repository contains:\n"
             "assets/shree-ram.png"
         )
 
@@ -68,15 +67,12 @@ def check_ram_image():
     if file_size < 10000:
 
         raise RuntimeError(
-            "assets/shree-ram.png appears to be invalid "
-            f"or too small ({file_size} bytes)."
+            "assets/shree-ram.png appears to be "
+            f"invalid or too small ({file_size} bytes)."
         )
 
     print(
-        "Lord Rama image found:"
-    )
-
-    print(
+        "Lord Rama image found:",
         RAM_IMAGE
     )
 
@@ -97,26 +93,18 @@ def validate_story(text):
         text
     ).strip()
 
-    # Remove extra whitespace
-
+    # Normalize whitespace
     text = " ".join(
         text.split()
     )
 
-    # --------------------------------------------------------
-    # Reject empty story
-    # --------------------------------------------------------
-
     if not text:
 
         raise RuntimeError(
-            "Story is empty."
+            "Generated story is empty."
         )
 
-    # --------------------------------------------------------
-    # Reject punctuation-only story
-    # --------------------------------------------------------
-
+    # Reject punctuation-only responses
     if text in [
         ".",
         "।",
@@ -129,10 +117,7 @@ def validate_story(text):
             "Generated story contains only punctuation."
         )
 
-    # --------------------------------------------------------
     # Count meaningful characters
-    # --------------------------------------------------------
-
     meaningful_characters = [
         character
         for character in text
@@ -153,10 +138,6 @@ def validate_story(text):
             "Generated story is too short or invalid."
         )
 
-    # --------------------------------------------------------
-    # Word count
-    # --------------------------------------------------------
-
     word_count = len(
         text.split()
     )
@@ -173,12 +154,10 @@ def validate_story(text):
 
 
 # ============================================================
-# AUDIO DURATION
+# GET MEDIA DURATION
 # ============================================================
 
-def get_duration(
-    filename
-):
+def get_duration(filename):
 
     command = [
         "ffprobe",
@@ -214,7 +193,7 @@ def get_duration(
 
 
 # ============================================================
-# GENERATE MARATHI AUDIO
+# GENERATE MARATHI NARRATION
 # ============================================================
 
 async def _generate_tts(
@@ -234,9 +213,7 @@ async def _generate_tts(
     )
 
 
-def generate_narration(
-    story
-):
+def generate_narration(story):
 
     story = validate_story(
         story
@@ -246,8 +223,6 @@ def generate_narration(
         OUTPUT_DIR,
         "narration.mp3"
     )
-
-    # Remove previous audio
 
     if os.path.exists(
         audio_file
@@ -268,7 +243,7 @@ def generate_narration(
     )
 
     print(
-        "Word count:",
+        "Story word count:",
         len(story.split())
     )
 
@@ -312,18 +287,15 @@ def generate_narration(
         f"{duration:.2f} seconds"
     )
 
-    # --------------------------------------------------------
-    # Catch the previous 3-second problem
-    # --------------------------------------------------------
-
+    # Prevent the previous "." / 3-second problem
     if duration < 5:
 
         raise RuntimeError(
             "Narration is only "
             f"{duration:.2f} seconds long.\n"
-            "The story was probably not generated correctly.\n"
-            "The pipeline has been stopped to prevent "
-            "uploading a bad Short."
+            "The generated story is probably invalid.\n"
+            "Pipeline stopped to prevent uploading "
+            "a bad Short."
         )
 
     print(
@@ -334,79 +306,81 @@ def generate_narration(
 
 
 # ============================================================
-# ADJUST AUDIO TO APPROXIMATELY 30 SECONDS
+# OPTIONAL AUDIO SPEED ADJUSTMENT
+#
+# IMPORTANT:
+# We NEVER cut the audio.
+#
+# If narration is already <= 60 sec, we keep it complete.
+# If it is slightly longer than 60 sec, we gently speed it up.
 # ============================================================
 
-def adjust_audio(
-    audio_file
-):
+def adjust_audio(audio_file):
 
     duration = get_duration(
         audio_file
     )
 
-    # Already approximately 30 sec
-
-    if (
-        duration >= 27
-        and
-        duration <= 30
-    ):
-
-        print(
-            "Narration already has a good duration."
-        )
-
-        return audio_file
-
-    # --------------------------------------------------------
-    # Shorter than 30 sec
-    #
-    # DO NOT artificially stretch the voice.
-    # We keep natural narration and allow the video
-    # to use the remaining seconds.
-    # --------------------------------------------------------
-
-    if duration < 27:
-
-        print(
-            f"Narration is {duration:.2f} seconds."
-        )
-
-        print(
-            "Keeping natural Marathi speaking speed."
-        )
-
-        return audio_file
-
-    # --------------------------------------------------------
-    # Longer than 30 sec
-    # --------------------------------------------------------
-
-    speed = (
-        duration /
-        TARGET_DURATION
-    )
-
-    # Maximum 1.25x to keep narration natural
-
-    if speed > 1.25:
-
-        speed = 1.25
-
     print()
     print(
-        f"Narration is {duration:.2f} seconds."
+        f"Original narration: "
+        f"{duration:.2f} seconds"
     )
 
-    print(
-        f"Adjusting narration speed to "
-        f"{speed:.2f}x"
+    # --------------------------------------------------------
+    # Ideal case:
+    # Keep the complete natural narration.
+    # --------------------------------------------------------
+
+    if duration <= 60:
+
+        print(
+            "Narration is within Shorts length."
+        )
+
+        print(
+            "Keeping complete natural narration."
+        )
+
+        return audio_file
+
+    # --------------------------------------------------------
+    # Longer than 60 sec.
+    #
+    # We try to bring it below 60 seconds,
+    # but NEVER cut the narration.
+    # --------------------------------------------------------
+
+    required_speed = (
+        duration / 59.0
     )
+
+    # Maximum speed increase
+    max_speed = 1.25
+
+    speed = min(
+        required_speed,
+        max_speed
+    )
+
+    # If even 1.25x cannot bring it under 60 sec,
+    # do not cut it. Keep the complete narration.
+    if duration / speed > 60:
+
+        print(
+            "Narration is longer than 60 seconds "
+            "even after safe speed adjustment."
+        )
+
+        print(
+            "Keeping complete narration."
+        )
+
+        return audio_file
 
     adjusted_file = os.path.join(
         OUTPUT_DIR,
-        "narration_30s.mp3"
+        "narration_adjusted.mp3"
     )
 
     if os.path.exists(
@@ -416,6 +390,11 @@ def adjust_audio(
         os.remove(
             adjusted_file
         )
+
+    print(
+        f"Adjusting narration speed to "
+        f"{speed:.2f}x"
+    )
 
     command = [
         "ffmpeg",
@@ -447,28 +426,26 @@ def adjust_audio(
 
         raise RuntimeError(
             "FFmpeg failed while adjusting "
-            "the Marathi narration."
+            "Marathi narration."
         ) from error
 
-    final_duration = get_duration(
+    adjusted_duration = get_duration(
         adjusted_file
     )
 
     print(
         f"Adjusted narration duration: "
-        f"{final_duration:.2f} seconds"
+        f"{adjusted_duration:.2f} seconds"
     )
 
     return adjusted_file
 
 
 # ============================================================
-# CREATE FINAL VIDEO
+# CREATE VIDEO
 # ============================================================
 
-def create_video(
-    episode
-):
+def create_video(episode):
 
     ensure_directories()
 
@@ -478,13 +455,13 @@ def create_video(
     print("=" * 60)
 
     # --------------------------------------------------------
-    # Check Rama image
+    # Check image
     # --------------------------------------------------------
 
     check_ram_image()
 
     # --------------------------------------------------------
-    # Get story
+    # Get episode information
     # --------------------------------------------------------
 
     story = episode.get(
@@ -502,34 +479,67 @@ def create_video(
         1
     )
 
+    print()
+    print(
+        f"Episode: {episode_number}"
+    )
+
+    print(
+        f"Title: {title}"
+    )
+
     # --------------------------------------------------------
     # Generate Marathi narration
     # --------------------------------------------------------
 
-    narration = generate_narration(
+    narration_file = generate_narration(
         story
     )
 
     # --------------------------------------------------------
-    # Adjust narration
+    # Adjust only if absolutely necessary
     # --------------------------------------------------------
 
     narration_file = adjust_audio(
-        narration
+        narration_file
     )
+
+    # --------------------------------------------------------
+    # IMPORTANT:
+    #
+    # Get the FINAL audio duration.
+    # The video will have exactly this duration.
+    # --------------------------------------------------------
 
     narration_duration = get_duration(
         narration_file
     )
 
     print()
+    print("=" * 60)
+    print("FULL NARRATION DURATION")
+    print("=" * 60)
+
     print(
-        f"Final narration duration: "
         f"{narration_duration:.2f} seconds"
     )
 
+    print(
+        "The video will use the COMPLETE narration."
+    )
+
+    print(
+        "Audio will NOT be cut."
+    )
+
+    print(
+        "Video will NOT be cut before narration ends."
+    )
+
+    print("=" * 60)
+
     # --------------------------------------------------------
-    # Output
+    # Output file
     # --------------------------------------------------------
 
     output_file = os.path.join(
@@ -546,25 +556,10 @@ def create_video(
         )
 
     # --------------------------------------------------------
-    # Determine video duration
+    # Gentle cinematic zoom
     #
-    # Always make a 30-second Short.
-    # If narration is shorter, remaining time is silent.
-    # --------------------------------------------------------
-
-    video_duration = TARGET_DURATION
-
-    # --------------------------------------------------------
-    # FFmpeg filter
-    #
-    # The Rama image:
-    #
-    # 1. Is scaled to fill 1080x1920
-    # 2. Has a gentle zoom effect
-    # 3. Is converted to 30fps
-    #
-    # This creates movement instead of a completely
-    # static image.
+    # The Rama image remains visible for the entire
+    # narration duration.
     # --------------------------------------------------------
 
     zoom_filter = (
@@ -573,13 +568,24 @@ def create_video(
         "force_original_aspect_ratio=increase,"
         "crop=1080:1920,"
         "zoompan="
-        "z='min(zoom+0.0008,1.12)':"
+        "z='min(zoom+0.0006,1.12)':"
         "x='iw/2-(iw/zoom/2)':"
         "y='ih/2-(ih/zoom/2)':"
         "d=1:"
         "s=1080x1920:"
         "fps=30"
     )
+
+    # --------------------------------------------------------
+    # FFmpeg
+    #
+    # IMPORTANT:
+    #
+    # - No -shortest
+    # - No forced 30-second -t
+    #
+    # The image is looped for the full audio duration.
+    # --------------------------------------------------------
 
     command = [
         "ffmpeg",
@@ -596,7 +602,7 @@ def create_video(
         RAM_IMAGE,
 
         # ----------------------------------------------------
-        # Marathi narration
+        # Complete Marathi audio
         # ----------------------------------------------------
 
         "-i",
@@ -610,21 +616,14 @@ def create_video(
         zoom_filter,
 
         # ----------------------------------------------------
-        # Video duration
-        # ----------------------------------------------------
-
-        "-t",
-        str(video_duration),
-
-        # ----------------------------------------------------
-        # Video mapping
+        # Map video
         # ----------------------------------------------------
 
         "-map",
         "0:v:0",
 
         # ----------------------------------------------------
-        # Audio mapping
+        # Map audio
         # ----------------------------------------------------
 
         "-map",
@@ -660,10 +659,15 @@ def create_video(
         "44100",
 
         # ----------------------------------------------------
-        # Prevent audio/video from exceeding target
+        # EXACTLY the full narration duration
+        #
+        # This is NOT a cut.
+        #
+        # It tells FFmpeg how long the image should continue.
         # ----------------------------------------------------
 
-        "-shortest",
+        "-t",
+        f"{narration_duration:.3f}",
 
         # ----------------------------------------------------
         # YouTube optimization
@@ -677,12 +681,17 @@ def create_video(
 
     print()
     print("=" * 60)
-    print("CREATING 1080x1920 SHORT")
+    print("RUNNING FFMPEG")
     print("=" * 60)
 
     print(
         "Image:",
         RAM_IMAGE
+    )
+
+    print(
+        "Audio:",
+        narration_file
     )
 
     print(
@@ -696,13 +705,13 @@ def create_video(
     )
 
     print(
-        "Target duration:",
-        "30 seconds"
+        f"Video duration: "
+        f"{narration_duration:.2f} seconds"
     )
 
     print()
     print(
-        "Running FFmpeg..."
+        "Creating video..."
     )
 
     try:
@@ -757,7 +766,11 @@ def create_video(
             "Generated video is invalid or too small."
         )
 
-    final_duration = get_duration(
+    # --------------------------------------------------------
+    # Check final video duration
+    # --------------------------------------------------------
+
+    final_video_duration = get_duration(
         output_file
     )
 
@@ -777,8 +790,13 @@ def create_video(
     )
 
     print(
-        f"Duration: "
-        f"{final_duration:.2f} seconds"
+        f"Audio duration: "
+        f"{narration_duration:.2f} seconds"
+    )
+
+    print(
+        f"Video duration: "
+        f"{final_video_duration:.2f} seconds"
     )
 
     print(
@@ -791,6 +809,44 @@ def create_video(
 
     print(
         "Audio: Marathi"
+    )
+
+    # --------------------------------------------------------
+    # Final duration safety check
+    #
+    # The video should not be substantially shorter than
+    # the narration.
+    # --------------------------------------------------------
+
+    duration_difference = abs(
+        final_video_duration
+        -
+        narration_duration
+    )
+
+    if duration_difference > 0.5:
+
+        raise RuntimeError(
+            "Video/audio duration mismatch.\n"
+            f"Audio: {narration_duration:.2f}s\n"
+            f"Video: {final_video_duration:.2f}s"
+        )
+
+    print()
+    print(
+        "Duration check: PASSED"
+    )
+
+    print(
+        "Complete narration preserved: YES"
+    )
+
+    print(
+        "Audio cut: NO"
+    )
+
+    print(
+        "Video cut: NO"
     )
 
     print("=" * 60)
@@ -806,11 +862,11 @@ if __name__ == "__main__":
 
     print()
     print(
-        "video_creator.py is ready."
+        "video_creator.py"
     )
 
     print(
-        "Expected Rama image:"
+        "Lord Rama image:"
     )
 
     print(
@@ -822,11 +878,11 @@ if __name__ == "__main__":
     ):
 
         print(
-            "Rama image: FOUND"
+            "Image status: FOUND"
         )
 
     else:
 
         print(
-            "Rama image: NOT FOUND"
+            "Image status: NOT FOUND"
         )
