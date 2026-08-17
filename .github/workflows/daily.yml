@@ -34,7 +34,6 @@ jobs:
 
       - name: Setup Python
         uses: actions/setup-python@v5
-
         with:
           python-version: "3.11"
 
@@ -47,7 +46,6 @@ jobs:
         run: |
 
           sudo apt-get update
-
           sudo apt-get install -y ffmpeg
 
 
@@ -59,7 +57,6 @@ jobs:
         run: |
 
           python -m pip install --upgrade pip
-
           pip install -r requirements.txt
 
 
@@ -68,7 +65,6 @@ jobs:
       # =====================================================
 
       - name: Create and upload Ramayana Short
-
         env:
 
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -86,11 +82,17 @@ jobs:
 
       # =====================================================
       # SAVE EPISODE STATE
+      #
+      # This step runs ONLY if the complete pipeline above
+      # succeeds, including YouTube upload.
       # =====================================================
 
       - name: Save next episode
-
         run: |
+
+          echo "Saving episode state..."
+
+          cat episode_state.json
 
           git config user.name "github-actions[bot]"
 
@@ -98,6 +100,16 @@ jobs:
 
           git add episode_state.json
 
-          git diff --cached --quiet || git commit -m "Update Ramayana episode state"
+          if git diff --cached --quiet; then
 
-          git push
+            echo "No episode state changes to commit."
+
+          else
+
+            git commit -m "Update Ramayana episode state"
+
+            git push
+
+            echo "Episode state successfully saved to GitHub."
+
+          fi
