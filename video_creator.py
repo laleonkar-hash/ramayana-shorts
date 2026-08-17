@@ -17,6 +17,10 @@ HEIGHT = 1920
 TARGET_DURATION = 30.0
 
 
+# ============================================================
+# DIRECTORIES
+# ============================================================
+
 def ensure_directories():
 
     os.makedirs(
@@ -30,6 +34,10 @@ def ensure_directories():
     )
 
 
+# ============================================================
+# FONT
+# ============================================================
+
 def get_font(size):
 
     fonts = [
@@ -37,17 +45,21 @@ def get_font(size):
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
     ]
 
-    for path in fonts:
+    for font_path in fonts:
 
-        if os.path.exists(path):
+        if os.path.exists(font_path):
 
             return ImageFont.truetype(
-                path,
+                font_path,
                 size
             )
 
     return ImageFont.load_default()
 
+
+# ============================================================
+# CREATE IMAGE SCENE
+# ============================================================
 
 def create_scene(
     title,
@@ -85,7 +97,7 @@ def create_scene(
         width=5
     )
 
-    # Decorative circles
+    # Decorative circle
 
     draw.ellipse(
         (
@@ -151,7 +163,7 @@ def create_scene(
     # Title
 
     wrapped_title = textwrap.fill(
-        title,
+        str(title),
         width=22
     )
 
@@ -202,14 +214,14 @@ async def generate_voice(
     subtitle_file
 ):
 
-    voice = edge_tts.Communicate(
+    communicate = edge_tts.Communicate(
         text=text,
         voice="en-IN-NeerjaNeural",
         rate="+0%",
         volume="+0%"
     )
 
-    await voice.save(
+    await communicate.save(
         audio_file,
         subtitle_file
     )
@@ -229,12 +241,30 @@ def generate_audio(text):
         "narration.srt"
     )
 
+    print()
+    print(
+        "Generating voice narration..."
+    )
+
     asyncio.run(
         generate_voice(
             text,
             audio_file,
             subtitle_file
         )
+    )
+
+    if not os.path.exists(
+        audio_file
+    ):
+
+        raise RuntimeError(
+            "Edge TTS did not create narration.mp3"
+        )
+
+    print(
+        "Narration created:",
+        audio_file
     )
 
     return (
@@ -244,7 +274,7 @@ def generate_audio(text):
 
 
 # ============================================================
-# GET AUDIO DURATION
+# AUDIO DURATION
 # ============================================================
 
 def get_duration(audio_file):
@@ -273,7 +303,7 @@ def get_duration(audio_file):
 
 
 # ============================================================
-# ADJUST AUDIO TO ~30 SECONDS
+# MAKE AUDIO APPROXIMATELY 30 SECONDS
 # ============================================================
 
 def make_audio_30_seconds(
@@ -284,6 +314,7 @@ def make_audio_30_seconds(
         audio_file
     )
 
+    print()
     print(
         f"Original narration duration: "
         f"{duration:.2f} seconds"
@@ -300,7 +331,7 @@ def make_audio_30_seconds(
             TARGET_DURATION
         )
 
-    # Don't allow extreme speeding.
+    # Keep voice speed within reasonable limits.
 
     speed = max(
         1.0,
@@ -311,8 +342,7 @@ def make_audio_30_seconds(
     )
 
     print(
-        f"Audio speed adjustment: "
-        f"{speed:.3f}x"
+        f"Voice speed: {speed:.3f}x"
     )
 
     adjusted_audio = os.path.join(
@@ -323,16 +353,25 @@ def make_audio_30_seconds(
     command = [
         "ffmpeg",
         "-y",
+
         "-i",
         audio_file,
+
         "-filter:a",
         f"atempo={speed:.6f}",
+
         "-ar",
         "44100",
+
         "-ac",
         "2",
+
         adjusted_audio
     ]
+
+    print(
+        "Adjusting narration..."
+    )
 
     subprocess.run(
         command,
@@ -352,52 +391,22 @@ def make_audio_30_seconds(
 
 
 # ============================================================
-# CREATE VIDEO
+# CREATE SCENES FILE
 # ============================================================
 
-def create_video(episode):
-
-    ensure_directories()
-
-    print()
-    print("Generating narration...")
-
-    audio_file, subtitle_file = generate_audio(
-        episode["story"]
-    )
-
-    adjusted_audio = make_audio_30_seconds(
-        audio_file
-    )
-
-    final_duration = get_duration(
-        adjusted_audio
-    )
-
-    # Create four scenes.
-
-    scene_files = []
-
-    for scene_number in range(1, 5):
-
-        scene_files.append(
-            create_scene(
-                episode["title"],
-                episode["episode"],
-                scene_number
-            )
-        )
-
-    # Divide video duration equally.
-
-    scene_duration = (
-        final_duration /
-        len(scene_files)
-    )
+def create_scenes_file(
+    scene_files,
+    duration
+):
 
     concat_file = os.path.join(
         TEMP_DIR,
         "scenes.txt"
+    )
+
+    scene_duration = (
+        duration /
+        len(scene_files)
     )
 
     with open(
@@ -406,25 +415,125 @@ def create_video(episode):
         encoding="utf-8"
     ) as f:
 
-        for scene in scene_files:
+        for scene_file in scene_files:
 
-            absolute_scene = os.path.abspath(
-                scene
+            absolute_path = os.path.abspath(
+                scene_file
             )
 
+            # FFmpeg concat files can have
+            # problems with certain characters.
+            #
+            # Our generated filenames are simple,
+            # so this is safe.
+
             f.write(
-                f"file '{absolute_scene}'\n"
+                f"file '{absolute_path}'\n"
             )
 
             f.write(
                 f"duration {scene_duration:.6f}\n"
             )
 
-        # Required by FFmpeg concat demuxer.
+        # FFmpeg concat demuxer needs the last
+        # file repeated.
+
+        last_file = os.path.abspath(
+            scene_files[-1]
+        )
 
         f.write(
-            f"file '{os.path.abspath(scene_files[-1])}'\n"
+            f"file '{last_file}'\n"
         )
+
+    return concat_file
+
+
+# ============================================================
+# CREATE FINAL VIDEO
+# ============================================================
+
+def create_video(episode):
+
+    ensure_directories()
+
+    print()
+    print("=" * 60)
+    print("CREATING RAMAYANA SHORT")
+    print("=" * 60)
+
+    # --------------------------------------------------------
+    # 1. Generate narration
+    # --------------------------------------------------------
+
+    audio_file, subtitle_file = generate_audio(
+        episode["story"]
+    )
+
+    # --------------------------------------------------------
+    # 2. Adjust audio
+    # --------------------------------------------------------
+
+    adjusted_audio = make_audio_30_seconds(
+        audio_file
+    )
+
+    # --------------------------------------------------------
+    # 3. Determine duration
+    # --------------------------------------------------------
+
+    duration = get_duration(
+        adjusted_audio
+    )
+
+    print(
+        f"Final audio duration: "
+        f"{duration:.2f} seconds"
+    )
+
+    # --------------------------------------------------------
+    # 4. Create scenes
+    # --------------------------------------------------------
+
+    print()
+    print(
+        "Creating visual scenes..."
+    )
+
+    scene_files = []
+
+    for scene_number in range(
+        1,
+        5
+    ):
+
+        scene_file = create_scene(
+            episode["title"],
+            episode["episode"],
+            scene_number
+        )
+
+        scene_files.append(
+            scene_file
+        )
+
+    # --------------------------------------------------------
+    # 5. Create concat file
+    # --------------------------------------------------------
+
+    concat_file = create_scenes_file(
+        scene_files,
+        duration
+    )
+
+    print(
+        "Scenes file:",
+        concat_file
+    )
+
+    # --------------------------------------------------------
+    # 6. Final output
+    # --------------------------------------------------------
 
     output_file = os.path.join(
         OUTPUT_DIR,
@@ -432,47 +541,14 @@ def create_video(episode):
     )
 
     # ========================================================
-    # SUBTITLE FILTER
-    #
     # IMPORTANT:
-    # There is NO backslash before the colon
-    # between filename and force_style.
+    #
+    # NO SUBTITLE FILTER HERE.
+    #
+    # We are intentionally removing subtitles for now.
+    # First we need to make sure FFmpeg successfully creates
+    # the video.
     # ========================================================
-
-    subtitle_path = os.path.abspath(
-        subtitle_file
-    )
-
-    subtitle_path = subtitle_path.replace(
-        "\\",
-        "/"
-    )
-
-    subtitle_path = subtitle_path.replace(
-        "'",
-        r"\'"
-    )
-
-    subtitle_filter = (
-        "subtitles="
-        f"filename='{subtitle_path}'"
-        ":force_style="
-        "'FontName=DejaVu Sans,"
-        "FontSize=18,"
-        "PrimaryColour=&H00FFFFFF,"
-        "OutlineColour=&H00000000,"
-        "BorderStyle=1,"
-        "Outline=2,"
-        "Shadow=1,"
-        "Alignment=2,"
-        "MarginV=160'"
-    )
-
-    video_filter = (
-        "scale=1080:1920,"
-        "format=yuv420p,"
-        + subtitle_filter
-    )
 
     command = [
         "ffmpeg",
@@ -490,14 +566,15 @@ def create_video(episode):
         "-i",
         adjusted_audio,
 
-        "-vf",
-        video_filter,
-
         "-map",
         "0:v:0",
 
         "-map",
         "1:a:0",
+
+        "-vf",
+        "scale=1080:1920:force_original_aspect_ratio=decrease,"
+        "pad=1080:1920:(ow-iw)/2:(oh-ih)/2",
 
         "-c:v",
         "libx264",
@@ -508,6 +585,9 @@ def create_video(episode):
         "-crf",
         "23",
 
+        "-pix_fmt",
+        "yuv420p",
+
         "-c:a",
         "aac",
 
@@ -517,9 +597,6 @@ def create_video(episode):
         "-t",
         "30",
 
-        "-pix_fmt",
-        "yuv420p",
-
         "-movflags",
         "+faststart",
 
@@ -527,17 +604,37 @@ def create_video(episode):
     ]
 
     print()
-    print("Creating 1080x1920 Short...")
-    print("Running FFmpeg...")
+    print("=" * 60)
+    print("RUNNING FFMPEG")
+    print("=" * 60)
+
+    print(
+        "Creating:",
+        output_file
+    )
+
+    print(
+        "Resolution:",
+        "1080x1920"
+    )
+
+    print(
+        "Subtitles:",
+        "TEMPORARILY DISABLED"
+    )
+
+    print("=" * 60)
 
     try:
 
-        subprocess.run(
+        result = subprocess.run(
             command,
-            check=True
+            check=True,
+            capture_output=True,
+            text=True
         )
 
-    except subprocess.CalledProcessError:
+    except subprocess.CalledProcessError as error:
 
         print()
         print("=" * 60)
@@ -545,16 +642,53 @@ def create_video(episode):
         print("=" * 60)
 
         print(
-            "Command:"
+            "Exit code:",
+            error.returncode
+        )
+
+        print()
+        print(
+            "FFmpeg output:"
         )
 
         print(
-            " ".join(command)
+            error.stdout
+        )
+
+        print(
+            error.stderr
         )
 
         print("=" * 60)
 
-        raise
+        raise RuntimeError(
+            "FFmpeg failed while creating "
+            "the video."
+        ) from error
+
+    # --------------------------------------------------------
+    # 7. Verify output
+    # --------------------------------------------------------
+
+    if not os.path.exists(
+        output_file
+    ):
+
+        raise RuntimeError(
+            "FFmpeg finished but final_short.mp4 "
+            "was not created."
+        )
+
+    file_size = os.path.getsize(
+        output_file
+    )
+
+    if file_size < 10000:
+
+        raise RuntimeError(
+            "final_short.mp4 was created but "
+            "the file appears to be invalid."
+        )
 
     print()
     print("=" * 60)
@@ -567,13 +701,13 @@ def create_video(episode):
     )
 
     print(
-        "Resolution:",
-        "1080x1920"
+        "Size:",
+        f"{file_size / 1024 / 1024:.2f} MB"
     )
 
     print(
-        "Target duration:",
-        "30 seconds"
+        "Resolution:",
+        "1080x1920"
     )
 
     print("=" * 60)
