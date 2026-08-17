@@ -17,52 +17,81 @@ def main():
     print("        DAILY RAMAYANA SHORT GENERATOR")
     print("=" * 70)
 
-    # 1. Select episode + generate unique Gemini story.
+    # --------------------------------------------------------
+    # 1. Select next episode and generate Gemini story
+    # --------------------------------------------------------
+
     episode = get_next_episode()
 
     print()
-    print("Selected episode:")
+    print(
+        "Selected episode:"
+    )
+
     print(
         episode["episode"],
         "-",
         episode["title"]
     )
 
-    # 2. Create video.
+    # --------------------------------------------------------
+    # 2. Create video
+    # --------------------------------------------------------
+
     video_file = create_video(
         episode
     )
 
-    # 3. Upload to YouTube.
+    # --------------------------------------------------------
+    # 3. Upload to YouTube
+    # --------------------------------------------------------
+
     youtube_url = upload_video(
         video_file,
         episode
     )
 
-    # 4. Only after successful upload,
-    #    advance to the next episode.
+    # --------------------------------------------------------
+    # 4. Update episode state ONLY after
+    #    successful YouTube upload
+    # --------------------------------------------------------
+
     episodes = load_episodes()
 
-    episode_numbers = [
-        get_episode_number(item)
-        for item in episodes
+    episode_numbers = []
+
+    for item in episodes:
+
+        try:
+
+            episode_numbers.append(
+                get_episode_number(item)
+            )
+
+        except Exception:
+
+            continue
+
+    current_episode = episode[
+        "episode"
     ]
 
-    current = episode["episode"]
-
-    larger = [
+    future_episodes = [
         number
         for number in episode_numbers
-        if number > current
+        if number > current_episode
     ]
 
-    if larger:
+    if future_episodes:
 
         next_episode = min(
-            larger
+            future_episodes
         )
 
     else:
+
+        # Restart from first episode
+        # after reaching the end.
 
         next_episode = min(
             episode_numbers
@@ -79,7 +108,7 @@ def main():
 
     print(
         "Episode:",
-        episode["episode"]
+        current_episode
     )
 
     print(
@@ -101,4 +130,5 @@ def main():
 
 
 if __name__ == "__main__":
+
     main()
