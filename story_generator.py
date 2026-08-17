@@ -1,23 +1,32 @@
 import json
 import os
+import time
 from datetime import datetime
 
 from google import genai
 
 
 # ============================================================
-# FILE SETTINGS
+# CONFIGURATION
 # ============================================================
 
 EPISODES_FILE = "ramayana_episodes.json"
 STATE_FILE = "episode_state.json"
 
-# Gemini model
-MODEL = "gemini-3.6-flash"
+# Primary + fallback models.
+#
+# If one model temporarily returns 503,
+# the program retries and then moves to the next model.
+
+MODELS = [
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-2.5-flash",
+]
 
 
 # ============================================================
-# LOAD RAMAYANA EPISODES
+# LOAD EPISODES
 # ============================================================
 
 def load_episodes():
@@ -36,90 +45,67 @@ def load_episodes():
 
         data = json.load(f)
 
-    # Format:
-    #
-    # [
-    #   {...},
-    #   {...}
-    # ]
-
     if isinstance(data, list):
 
         return data
-
-    # Format:
-    #
-    # {
-    #   "episodes": [
-    #       {...},
-    #       {...}
-    #   ]
-    # }
 
     if isinstance(data, dict):
 
         if "episodes" in data:
 
-            episodes = data["episodes"]
+            if isinstance(
+                data["episodes"],
+                list
+            ):
 
-            if isinstance(episodes, list):
-
-                return episodes
+                return data["episodes"]
 
     raise RuntimeError(
-        "ramayana_episodes.json must contain either "
-        "a list of episodes or an object containing "
-        "an 'episodes' list."
+        "ramayana_episodes.json must contain "
+        "a list or an 'episodes' list."
     )
 
 
 # ============================================================
-# GET EPISODE NUMBER
+# EPISODE HELPERS
 # ============================================================
 
 def get_episode_number(item):
 
-    possible_keys = [
+    for key in [
         "episode",
         "episode_number",
         "number",
         "id"
-    ]
-
-    for key in possible_keys:
+    ]:
 
         if key in item:
 
             try:
 
-                return int(item[key])
+                return int(
+                    item[key]
+                )
 
             except (
                 ValueError,
                 TypeError
             ):
 
-                pass
+                continue
 
     raise RuntimeError(
-        "Could not find a valid episode number "
-        "in ramayana_episodes.json."
+        "No valid episode number found."
     )
 
 
-# ============================================================
-# GET EPISODE TITLE
-# ============================================================
-
 def get_episode_title(item):
 
-    possible_keys = [
+    for key in [
         "title",
         "name",
         "episode_title"
-    ]
-
-    for key in possible_keys:
+    ]:
 
         if key in item:
 
@@ -134,20 +120,14 @@ def get_episode_title(item):
     return "Ramayana Story"
 
 
-# ============================================================
-# GET SOURCE STORY
-# ============================================================
-
 def get_episode_source(item):
 
-    possible_keys = [
+    for key in [
         "story",
         "description",
         "summary",
         "content"
-    ]
-
-    for key in possible_keys:
+    ]:
 
         if key in item:
 
@@ -160,19 +140,16 @@ def get_episode_source(item):
                 return value
 
     raise RuntimeError(
-        "Could not find story/description/summary/content "
-        "for the selected Ramayana episode."
+        "No story/description/summary/content "
+        "found for episode."
     )
 
 
 # ============================================================
-# LOAD CURRENT EPISODE STATE
+# STATE
 # ============================================================
 
 def load_state():
-
-    # If state file doesn't exist,
-    # start with Episode 1.
 
     if not os.path.exists(STATE_FILE):
 
@@ -188,35 +165,25 @@ def load_state():
 
             state = json.load(f)
 
-        next_episode = int(
-            state.get(
-                "next_episode",
-                1
+        return max(
+            1,
+            int(
+                state.get(
+                    "next_episode",
+                    1
+                )
             )
         )
-
-        if next_episode < 1:
-
-            return 1
-
-        return next_episode
 
     except Exception:
 
         print(
-            "WARNING: Could not read episode_state.json."
-        )
-
-        print(
-            "Starting from Episode 1."
+            "WARNING: episode_state.json "
+            "could not be read."
         )
 
         return 1
 
-
-# ============================================================
-# SAVE NEXT EPISODE
-# ============================================================
 
 def save_state(next_episode):
 
@@ -253,11 +220,11 @@ def find_episode(
 
         try:
 
-            number = get_episode_number(
-                item
-            )
-
-            if number == episode_number:
+            if (
+                get_episode_number(item)
+                ==
+                episode_number
+            ):
 
                 return item
 
@@ -269,7 +236,7 @@ def find_episode(
 
 
 # ============================================================
-# CREATE GEMINI CLIENT
+# GEMINI CLIENT
 # ============================================================
 
 def create_gemini_client():
@@ -281,8 +248,7 @@ def create_gemini_client():
     if not api_key:
 
         raise RuntimeError(
-            "GEMINI_API_KEY is missing. "
-            "Add GEMINI_API_KEY to GitHub Actions Secrets."
+            "GEMINI_API_KEY is missing."
         )
 
     return genai.Client(
@@ -291,7 +257,147 @@ def create_gemini_client():
 
 
 # ============================================================
-# GENERATE UNIQUE RAMAYANA STORY
+# GEMINI REQUEST WITH RETRIES + FALLBACKS
+# ============================================================
+
+def generate_with_fallback(
+    client,
+    prompt
+):
+
+    last_error = None
+
+    for model in MODELS:
+
+        print()
+        print("=" * 60)
+        print(
+            f"TRYING GEMINI MODEL: {model}"
+        )
+        print("=" * 60)
+
+        # Three attempts per model.
+        for attempt in range(1, 4):
+
+            try:
+
+                print(
+                    f"Attempt {attempt}/3"
+                )
+
+                response = (
+                    client.models.generate_content(
+                        model=model,
+                        contents=prompt
+                    )
+                )
+
+                if response is None:
+
+                    raise RuntimeError(
+                        "Gemini returned no response."
+                    )
+
+                text = getattr(
+                    response,
+                    "text",
+                    None
+                )
+
+                if text and text.strip():
+
+                    print()
+                    print(
+                        f"SUCCESS: {model}"
+                    )
+
+                    return response
+
+                raise RuntimeError(
+                    "Gemini returned an empty response."
+                )
+
+            except Exception as error:
+
+                last_error = error
+
+                error_text = str(
+                    error
+                )
+
+                print()
+                print(
+                    f"{model} attempt "
+                    f"{attempt} failed:"
+                )
+
+                print(
+                    error_text
+                )
+
+                temporary_error = (
+                    "503" in error_text
+                    or
+                    "UNAVAILABLE" in error_text
+                    or
+                    "429" in error_text
+                    or
+                    "RESOURCE_EXHAUSTED" in error_text
+                    or
+                    "500" in error_text
+                    or
+                    "502" in error_text
+                    or
+                    "504" in error_text
+                )
+
+                if temporary_error:
+
+                    wait_seconds = (
+                        5 * attempt
+                    )
+
+                    print(
+                        f"Temporary error."
+                    )
+
+                    print(
+                        f"Waiting "
+                        f"{wait_seconds} seconds..."
+                    )
+
+                    time.sleep(
+                        wait_seconds
+                    )
+
+                    continue
+
+                # Authentication, invalid API key,
+                # invalid model, etc.
+                #
+                # These should not be endlessly retried.
+                raise RuntimeError(
+                    f"Gemini API request failed: "
+                    f"{error}"
+                ) from error
+
+        print()
+        print(
+            f"All retries failed for {model}."
+        )
+
+        print(
+            "Moving to fallback model..."
+        )
+
+    raise RuntimeError(
+        "All Gemini models failed. "
+        f"Last error: {last_error}"
+    )
+
+
+# ============================================================
+# GENERATE STORY
 # ============================================================
 
 def generate_story(episode):
@@ -318,10 +424,9 @@ def generate_story(episode):
 You are an expert storyteller specializing
 in the Ramayana.
 
-You are creating ONE daily YouTube Short
-for a Ramayana storytelling channel.
+You are creating one daily YouTube Short.
 
-TODAY'S DATE:
+TODAY:
 {today}
 
 EPISODE NUMBER:
@@ -330,103 +435,80 @@ EPISODE NUMBER:
 EPISODE TITLE:
 {episode_title}
 
-SOURCE INFORMATION FOR THIS EPISODE:
+SOURCE INFORMATION:
 {source_story}
 
 
-YOUR TASK:
+TASK:
 
-Create a unique and engaging narration for
-a YouTube Short based ONLY on the supplied
-episode information.
+Create a UNIQUE narration for a
+25–30 second YouTube Short.
 
 
-VERY IMPORTANT STORY RULES:
+STRICT RULES:
 
 1. Stay faithful to the supplied Ramayana source.
 
-2. Do NOT invent major events.
+2. Do not invent major events.
 
-3. Do NOT invent characters.
+3. Do not invent characters.
 
-4. Do NOT change relationships between characters.
+4. Do not change character relationships.
 
-5. Do NOT combine this episode with another
-   Ramayana episode.
+5. Do not combine this episode with another episode.
 
-6. Do NOT introduce events that happen later
-   in the Ramayana.
+6. Do not introduce events that belong to later episodes.
 
-7. Do NOT contradict the supplied source.
+7. Do not contradict the supplied source.
 
-8. Use simple, natural English.
+8. Use simple natural English.
 
-9. Make the first sentence interesting enough
-   to catch attention immediately.
+9. Make the first sentence an interesting hook.
 
-10. The narration MUST contain approximately
+10. The STORY should contain approximately
     55–65 words.
 
-11. The narration should normally fit into
-    approximately 25–30 seconds when spoken.
+11. Make it sound natural when spoken aloud.
 
-12. Write it as natural spoken narration,
-    not as an article.
+12. Do not use bullet points.
 
-13. Do NOT use bullet points.
+13. Do not use numbered points.
 
-14. Do NOT use numbered points.
+14. Do not use emojis.
 
-15. Do NOT use emojis.
+15. Do not mention AI, Gemini, automation,
+    scripts or prompts.
 
-16. Do NOT use quotation marks around the
-    entire narration.
+16. Do not write "according to the source".
 
-17. Do NOT use headings inside the story.
+17. Do not put headings inside STORY.
 
-18. Do NOT mention AI, Gemini, prompts,
-    scripts, or automation.
+18. Keep the story respectful.
 
-19. Do NOT say "according to the source".
+19. Make the wording fresh and engaging.
+    Do not simply copy the source text.
 
-20. End with a short curiosity or continuation
-    feeling that encourages viewers to watch
-    the next episode.
+20. End with a small curiosity or continuation
+    feeling.
 
-21. Keep the story respectful and suitable
-    for a general YouTube audience.
+21. The story must remain focused on THIS episode.
 
-22. The story must be different in wording
-    from a simple copy of the source text.
-
-23. Do not add a moral lesson unless it is
-    naturally part of the supplied episode.
+22. Do not add unrelated mythology.
 
 
-OUTPUT FORMAT:
-
-Return EXACTLY these two sections:
+RETURN EXACTLY:
 
 TITLE:
-A short engaging YouTube Shorts title
+<short engaging title>
 
 STORY:
-The complete 55–65 word narration
-
-
-Do not return anything before TITLE.
-Do not return anything after the STORY.
+<55–65 word narration>
 """
 
     print()
     print("=" * 60)
-    print("ASKING GEMINI TO CREATE UNIQUE RAMAYANA STORY")
+    print("ASKING GEMINI TO CREATE STORY")
     print("=" * 60)
-
-    print(
-        "Model:",
-        MODEL
-    )
 
     print(
         "Episode:",
@@ -434,44 +516,24 @@ Do not return anything after the STORY.
     )
 
     print(
-        "Episode title:",
+        "Title:",
         episode_title
     )
 
     print("=" * 60)
 
-    try:
-
-        response = client.models.generate_content(
-            model=MODEL,
-            contents=prompt
-        )
-
-    except Exception as error:
-
-        raise RuntimeError(
-            f"Gemini API request failed: {error}"
-        ) from error
-
-    if response is None:
-
-        raise RuntimeError(
-            "Gemini returned no response."
-        )
-
-    text = getattr(
-        response,
-        "text",
-        None
+    response = generate_with_fallback(
+        client,
+        prompt
     )
+
+    text = response.text.strip()
 
     if not text:
 
         raise RuntimeError(
-            "Gemini returned an empty response."
+            "Gemini returned an empty story."
         )
-
-    text = text.strip()
 
     print()
     print("=" * 60)
@@ -482,29 +544,20 @@ Do not return anything after the STORY.
 
     print("=" * 60)
 
-
     # ========================================================
-    # PARSE TITLE AND STORY
+    # PARSE RESPONSE
     # ========================================================
 
     title = ""
-    story = ""
-
-    lines = text.splitlines()
+    story_lines = []
 
     collecting_story = False
 
-    story_lines = []
-
-    for line in lines:
+    for line in text.splitlines():
 
         clean = line.strip()
 
         if not clean:
-
-            if collecting_story:
-
-                story_lines.append(" ")
 
             continue
 
@@ -519,37 +572,30 @@ Do not return anything after the STORY.
 
             collecting_story = False
 
-            continue
+        elif upper.startswith("STORY:"):
 
-        if upper.startswith("STORY:"):
-
-            first_story_part = clean.split(
+            first_part = clean.split(
                 ":",
                 1
             )[1].strip()
 
-            if first_story_part:
+            if first_part:
 
                 story_lines.append(
-                    first_story_part
+                    first_part
                 )
 
             collecting_story = True
 
-            continue
-
-        if collecting_story:
+        elif collecting_story:
 
             story_lines.append(
                 clean
             )
 
-
     story = " ".join(
         story_lines
     )
-
-    # Clean multiple spaces.
 
     story = " ".join(
         story.split()
@@ -559,13 +605,9 @@ Do not return anything after the STORY.
         title.split()
     )
 
-
     # ========================================================
     # FALLBACK PARSING
     # ========================================================
-
-    # If Gemini didn't follow the format perfectly,
-    # try to recover the content.
 
     if not title:
 
@@ -573,57 +615,47 @@ Do not return anything after the STORY.
 
     if not story:
 
-        # Try finding STORY in the raw response.
-
         upper_text = text.upper()
 
-        story_position = upper_text.find(
+        position = upper_text.find(
             "STORY:"
         )
 
-        if story_position != -1:
+        if position != -1:
 
             story = text[
-                story_position + len("STORY:")
+                position + len("STORY:")
             :].strip()
 
             story = " ".join(
                 story.split()
             )
 
-
     if not story:
 
         raise RuntimeError(
-            "Could not extract STORY from Gemini response."
+            "Could not extract story from Gemini."
         )
-
-
-    # ========================================================
-    # CLEAN GEMINI OUTPUT
-    # ========================================================
-
-    story = story.strip()
 
     # Remove accidental wrapping quotes.
 
     if (
         story.startswith('"')
-        and story.endswith('"')
+        and
+        story.endswith('"')
     ):
 
         story = story[1:-1].strip()
 
     if (
         story.startswith("'")
-        and story.endswith("'")
+        and
+        story.endswith("'")
     ):
 
         story = story[1:-1].strip()
 
-
-    # Remove accidental "STORY:" if Gemini
-    # repeated it.
+    # Remove accidental repeated STORY prefix.
 
     if story.upper().startswith(
         "STORY:"
@@ -633,7 +665,6 @@ Do not return anything after the STORY.
             ":",
             1
         )[1].strip()
-
 
     # ========================================================
     # WORD COUNT
@@ -663,25 +694,17 @@ Do not return anything after the STORY.
 
     print("=" * 60)
 
-
-    # We don't hard-fail if Gemini returns
-    # slightly outside the requested range.
-    #
-    # video_creator.py will still control
-    # the final audio/video duration.
-
     if word_count < 45:
 
         print(
-            "WARNING: Gemini generated a very short story."
+            "WARNING: Story is shorter than expected."
         )
 
     if word_count > 75:
 
         print(
-            "WARNING: Gemini generated a longer story."
+            "WARNING: Story is longer than expected."
         )
-
 
     return {
         "episode": episode_number,
@@ -692,7 +715,7 @@ Do not return anything after the STORY.
 
 
 # ============================================================
-# GET NEXT EPISODE AND GENERATE STORY
+# SELECT NEXT EPISODE
 # ============================================================
 
 def get_next_episode():
@@ -702,7 +725,8 @@ def get_next_episode():
     if not episodes:
 
         raise RuntimeError(
-            "ramayana_episodes.json contains no episodes."
+            "No episodes found in "
+            "ramayana_episodes.json."
         )
 
     next_number = load_state()
@@ -713,7 +737,7 @@ def get_next_episode():
     print("=" * 60)
 
     print(
-        "Next episode from state:",
+        "Next episode:",
         next_number
     )
 
@@ -722,17 +746,14 @@ def get_next_episode():
         next_number
     )
 
-    # If the requested episode doesn't exist,
-    # restart from the first available episode.
+    # If episode doesn't exist,
+    # restart from the first episode.
 
     if episode is None:
 
         print(
-            f"Episode {next_number} was not found."
-        )
-
-        print(
-            "Restarting from the first episode."
+            f"Episode {next_number} "
+            "was not found."
         )
 
         valid_numbers = []
@@ -747,30 +768,29 @@ def get_next_episode():
 
             except Exception:
 
-                pass
+                continue
 
         if not valid_numbers:
 
             raise RuntimeError(
-                "No valid episode numbers found "
-                "in ramayana_episodes.json."
+                "No valid episode numbers "
+                "found."
             )
 
-        first_episode_number = min(
+        first_number = min(
             valid_numbers
         )
 
         episode = find_episode(
             episodes,
-            first_episode_number
+            first_number
         )
 
     if episode is None:
 
         raise RuntimeError(
-            "Could not select a Ramayana episode."
+            "Could not select episode."
         )
-
 
     selected_number = get_episode_number(
         episode
@@ -793,32 +813,24 @@ def get_next_episode():
 
     print("=" * 60)
 
+    # Generate unique Gemini story.
 
-    # Generate the unique Gemini narration.
-
-    generated_story = generate_story(
+    return generate_story(
         episode
     )
 
-    return generated_story
-
 
 # ============================================================
-# TEST MODE
+# TEST
 # ============================================================
 
 if __name__ == "__main__":
-
-    print()
-    print("=" * 60)
-    print("RAMAYANA STORY GENERATOR TEST")
-    print("=" * 60)
 
     result = get_next_episode()
 
     print()
     print("=" * 60)
-    print("FINAL STORY OBJECT")
+    print("FINAL STORY")
     print("=" * 60)
 
     print(
