@@ -4,144 +4,173 @@ import subprocess
 import textwrap
 
 import edge_tts
+
 from PIL import Image, ImageDraw, ImageFont
 
 
 OUTPUT_DIR = "output"
 TEMP_DIR = "temp"
 
-VIDEO_WIDTH = 1080
-VIDEO_HEIGHT = 1920
+WIDTH = 1080
+HEIGHT = 1920
 
 
 def ensure_directories():
 
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    os.makedirs(TEMP_DIR, exist_ok=True)
+    os.makedirs(
+        OUTPUT_DIR,
+        exist_ok=True
+    )
+
+    os.makedirs(
+        TEMP_DIR,
+        exist_ok=True
+    )
 
 
-def find_font():
+def get_font(size):
 
-    possible_fonts = [
+    fonts = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
     ]
 
-    for font in possible_fonts:
-        if os.path.exists(font):
-            return font
+    for path in fonts:
 
-    return None
+        if os.path.exists(path):
+
+            return ImageFont.truetype(
+                path,
+                size
+            )
+
+    return ImageFont.load_default()
 
 
-def create_scene_image(title, episode_number, scene_number):
+def create_scene(
+    title,
+    story,
+    episode,
+    scene_number
+):
 
     ensure_directories()
 
-    filename = os.path.join(
-        TEMP_DIR,
-        f"scene_{scene_number}.png"
-    )
-
     image = Image.new(
         "RGB",
-        (VIDEO_WIDTH, VIDEO_HEIGHT),
+        (WIDTH, HEIGHT),
         (18, 12, 35)
     )
 
-    draw = ImageDraw.Draw(image)
+    draw = ImageDraw.Draw(
+        image
+    )
 
-    font_path = find_font()
+    title_font = get_font(70)
+    episode_font = get_font(44)
+    story_font = get_font(40)
+    small_font = get_font(30)
 
-    if font_path:
-        title_font = ImageFont.truetype(font_path, 70)
-        episode_font = ImageFont.truetype(font_path, 42)
-        small_font = ImageFont.truetype(font_path, 34)
-    else:
-        title_font = ImageFont.load_default()
-        episode_font = ImageFont.load_default()
-        small_font = ImageFont.load_default()
+    # Decorative frame
+    draw.rounded_rectangle(
+        (55, 55, WIDTH - 55, HEIGHT - 55),
+        radius=35,
+        outline=(220, 180, 100),
+        width=5
+    )
 
     # Decorative circles
     draw.ellipse(
-        (100, 200, 980, 1080),
-        outline=(220, 170, 80),
-        width=8
+        (120, 180, 960, 1020),
+        outline=(220, 180, 100),
+        width=6
     )
 
     draw.ellipse(
-        (180, 280, 900, 1000),
-        outline=(180, 130, 70),
+        (190, 250, 890, 950),
+        outline=(150, 110, 70),
         width=3
     )
 
-    # Om symbol
-    om_font = title_font
-
+    # Om
     draw.text(
-        (540, 480),
+        (WIDTH // 2, 510),
         "ॐ",
-        font=om_font,
-        fill=(240, 190, 90),
-        anchor="mm"
-    )
-
-    draw.text(
-        (540, 1180),
-        f"RAMAYANA",
         font=title_font,
-        fill=(240, 210, 150),
+        fill=(245, 200, 110),
         anchor="mm"
     )
 
     draw.text(
-        (540, 1280),
-        f"EPISODE {episode_number}",
+        (WIDTH // 2, 1110),
+        "RAMAYANA",
+        font=title_font,
+        fill=(245, 220, 170),
+        anchor="mm"
+    )
+
+    draw.text(
+        (WIDTH // 2, 1200),
+        f"EPISODE {episode}",
         font=episode_font,
         fill=(220, 190, 140),
         anchor="mm"
     )
 
-    wrapped = textwrap.fill(title, width=24)
+    wrapped_title = textwrap.fill(
+        title,
+        width=22
+    )
 
     draw.text(
-        (540, 1430),
-        wrapped,
-        font=small_font,
+        (WIDTH // 2, 1370),
+        wrapped_title,
+        font=story_font,
         fill=(255, 255, 255),
         anchor="mm",
         align="center"
     )
 
     draw.text(
-        (540, 1760),
-        "A journey of Dharma • Courage • Devotion",
+        (WIDTH // 2, 1740),
+        f"Scene {scene_number}",
         font=small_font,
-        fill=(190, 180, 180),
+        fill=(190, 185, 185),
         anchor="mm"
     )
 
-    image.save(filename)
+    filename = os.path.join(
+        TEMP_DIR,
+        f"scene_{scene_number}.png"
+    )
+
+    image.save(
+        filename
+    )
 
     return filename
 
 
-async def generate_voice(text, output_file, subtitle_file):
+async def generate_voice(
+    text,
+    audio_file,
+    subtitle_file
+):
 
-    communicate = edge_tts.Communicate(
+    voice = edge_tts.Communicate(
         text=text,
         voice="en-IN-NeerjaNeural",
-        rate="-5%",
+        rate="-2%",
         volume="+0%"
     )
 
-    await communicate.save(
-        output_file,
+    await voice.save(
+        audio_file,
         subtitle_file
     )
 
 
-def generate_voice_sync(text):
+def generate_audio(text):
 
     ensure_directories()
 
@@ -163,10 +192,13 @@ def generate_voice_sync(text):
         )
     )
 
-    return audio_file, subtitle_file
+    return (
+        audio_file,
+        subtitle_file
+    )
 
 
-def get_audio_duration(audio_file):
+def get_duration(audio_file):
 
     command = [
         "ffprobe",
@@ -186,55 +218,101 @@ def get_audio_duration(audio_file):
         check=True
     )
 
-    return float(result.stdout.strip())
+    return float(
+        result.stdout.strip()
+    )
 
 
 def create_video(episode):
 
     ensure_directories()
 
+    print()
     print("Generating narration...")
 
-    audio_file, subtitle_file = generate_voice_sync(
-        episode["narration"]
+    audio_file, subtitle_file = generate_audio(
+        episode["story"]
     )
 
-    print("Voice created:", audio_file)
+    duration = get_duration(
+        audio_file
+    )
 
-    duration = get_audio_duration(audio_file)
+    print(
+        f"Original narration duration: "
+        f"{duration:.2f} seconds"
+    )
 
-    # Ensure at least a short visual duration
-    duration = max(duration, 10)
+    # Keep the target around 30 seconds.
+    # Small speed adjustment is used instead of cutting words.
+    target_duration = 30.0
 
-    print(f"Audio duration: {duration:.2f} seconds")
+    speed = duration / target_duration
+
+    # Keep speed adjustment within reasonable limits.
+    speed = max(
+        0.85,
+        min(1.15, speed)
+    )
+
+    adjusted_audio = os.path.join(
+        OUTPUT_DIR,
+        "narration_30s.mp3"
+    )
+
+    audio_command = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        audio_file,
+        "-filter:a",
+        f"atempo={speed:.4f}",
+        "-ar",
+        "44100",
+        adjusted_audio
+    ]
+
+    subprocess.run(
+        audio_command,
+        check=True
+    )
+
+    final_duration = get_duration(
+        adjusted_audio
+    )
+
+    print(
+        f"Adjusted narration duration: "
+        f"{final_duration:.2f} seconds"
+    )
 
     scene_files = []
 
-    # Create 4 visual scenes
     for i in range(1, 5):
 
-        scene = create_scene_image(
-            episode["title"],
-            episode["episode"],
-            i
+        scene_files.append(
+            create_scene(
+                episode["title"],
+                episode["story"],
+                episode["episode"],
+                i
+            )
         )
-
-        scene_files.append(scene)
-
-    output_file = os.path.join(
-        OUTPUT_DIR,
-        "final_short.mp4"
-    )
-
-    # Each scene gets an equal portion of the narration.
-    scene_duration = duration / len(scene_files)
 
     concat_file = os.path.join(
         TEMP_DIR,
-        "concat.txt"
+        "scenes.txt"
     )
 
-    with open(concat_file, "w", encoding="utf-8") as f:
+    scene_duration = (
+        final_duration / len(scene_files)
+    )
+
+    with open(
+        concat_file,
+        "w",
+        encoding="utf-8"
+    ) as f:
 
         for scene in scene_files:
 
@@ -246,10 +324,41 @@ def create_video(episode):
                 f"duration {scene_duration}\n"
             )
 
-        # Repeat final frame so ffmpeg respects the duration
         f.write(
             f"file '{os.path.abspath(scene_files[-1])}'\n"
         )
+
+    output_file = os.path.join(
+        OUTPUT_DIR,
+        "final_short.mp4"
+    )
+
+    # Convert SRT path for FFmpeg subtitles.
+    subtitle_path = os.path.abspath(
+        subtitle_file
+    ).replace(
+        "\\",
+        "/"
+    ).replace(
+        ":",
+        "\\:"
+    )
+
+    video_filter = (
+        "scale=1080:1920,"
+        "format=yuv420p,"
+        f"subtitles='{subtitle_path}':"
+        "force_style="
+        "'FontName=DejaVu Sans,"
+        "FontSize=18,"
+        "PrimaryColour=&H00FFFFFF,"
+        "OutlineColour=&H00000000,"
+        "BorderStyle=1,"
+        "Outline=2,"
+        "Shadow=1,"
+        "Alignment=2,"
+        "MarginV=160'"
+    )
 
     command = [
         "ffmpeg",
@@ -265,13 +374,10 @@ def create_video(episode):
         concat_file,
 
         "-i",
-        audio_file,
+        adjusted_audio,
 
         "-vf",
-        (
-            "scale=1080:1920,"
-            "format=yuv420p"
-        ),
+        video_filter,
 
         "-map",
         "0:v:0",
@@ -294,18 +400,28 @@ def create_video(episode):
         "-b:a",
         "128k",
 
-        "-shortest",
+        "-t",
+        "30",
+
+        "-movflags",
+        "+faststart",
 
         output_file
     ]
 
-    print("Creating final video...")
+    print()
+    print("Creating 1080x1920 Short...")
 
     subprocess.run(
         command,
         check=True
     )
 
-    print("Video created:", output_file)
+    print()
+    print("=" * 60)
+    print("VIDEO CREATED")
+    print("=" * 60)
+    print(output_file)
+    print("=" * 60)
 
     return output_file
