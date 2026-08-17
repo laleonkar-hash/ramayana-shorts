@@ -2,7 +2,12 @@ import os
 import sys
 import traceback
 
-from story_generator import get_next_episode
+from story_generator import (
+    get_next_episode,
+    load_state,
+    save_state
+)
+
 from video_creator import create_video
 from youtube_uploader import upload_video
 
@@ -26,7 +31,7 @@ def print_header():
     print("=" * 60)
     print("Language : Marathi")
     print("Format   : YouTube Short")
-    print("Duration : ~30 seconds")
+    print("Duration : Full narration")
     print("=" * 60)
 
 
@@ -67,7 +72,7 @@ def validate_story(episode):
     print("=" * 60)
 
     # --------------------------------------------------------
-    # Basic validation
+    # Empty story
     # --------------------------------------------------------
 
     if not story:
@@ -77,7 +82,7 @@ def validate_story(episode):
         )
 
     # --------------------------------------------------------
-    # Remove whitespace and count words
+    # Count words
     # --------------------------------------------------------
 
     words = story.split()
@@ -92,7 +97,7 @@ def validate_story(episode):
     )
 
     # --------------------------------------------------------
-    # Reject punctuation-only response
+    # Meaningful characters
     # --------------------------------------------------------
 
     meaningful_characters = [
@@ -117,7 +122,7 @@ def validate_story(episode):
         )
 
     # --------------------------------------------------------
-    # Minimum word check
+    # Minimum words
     # --------------------------------------------------------
 
     if word_count < MIN_STORY_WORDS:
@@ -129,7 +134,7 @@ def validate_story(episode):
         )
 
     # --------------------------------------------------------
-    # Explicit punctuation check
+    # Punctuation-only response
     # --------------------------------------------------------
 
     if story in [
@@ -190,6 +195,63 @@ def print_episode_info(
 
 
 # ============================================================
+# ADVANCE EPISODE
+# ============================================================
+
+def advance_episode(
+    current_episode
+):
+
+    try:
+
+        current_episode = int(
+            current_episode
+        )
+
+    except (
+        ValueError,
+        TypeError
+    ):
+
+        raise RuntimeError(
+            "Invalid current episode number: "
+            f"{current_episode}"
+        )
+
+    next_episode = (
+        current_episode + 1
+    )
+
+    save_state(
+        next_episode
+    )
+
+    print()
+    print("=" * 60)
+    print("EPISODE STATE UPDATED")
+    print("=" * 60)
+
+    print(
+        "Completed episode:",
+        current_episode
+    )
+
+    print(
+        "Next episode:",
+        next_episode
+    )
+
+    print(
+        "State file:",
+        "episode_state.json"
+    )
+
+    print("=" * 60)
+
+    return next_episode
+
+
+# ============================================================
 # MAIN PIPELINE
 # ============================================================
 
@@ -211,6 +273,21 @@ def main():
         print("STEP 1: GENERATING STORY")
         print("=" * 60)
 
+        # ----------------------------------------------------
+        # Remember the state BEFORE this run.
+        # ----------------------------------------------------
+
+        state_before = load_state()
+
+        print(
+            "Episode state before run:",
+            state_before
+        )
+
+        # ----------------------------------------------------
+        # Generate the episode.
+        # ----------------------------------------------------
+
         episode = get_next_episode()
 
         if not episode:
@@ -222,6 +299,36 @@ def main():
         print_episode_info(
             episode
         )
+
+        # ----------------------------------------------------
+        # Verify selected episode.
+        # ----------------------------------------------------
+
+        current_episode = episode.get(
+            "episode"
+        )
+
+        if current_episode is None:
+
+            raise RuntimeError(
+                "Selected episode has no episode number."
+            )
+
+        try:
+
+            current_episode = int(
+                current_episode
+            )
+
+        except (
+            ValueError,
+            TypeError
+        ):
+
+            raise RuntimeError(
+                "Invalid episode number: "
+                f"{current_episode}"
+            )
 
         # ====================================================
         # STEP 2
@@ -309,9 +416,35 @@ def main():
             video_file
         )
 
+        # ----------------------------------------------------
+        # IMPORTANT:
+        #
+        # This function must finish successfully before
+        # we advance the episode.
+        # ----------------------------------------------------
+
         upload_result = upload_video(
             video_file,
             episode
+        )
+
+        print()
+        print(
+            "YouTube upload completed successfully."
+        )
+
+        # ====================================================
+        # STEP 5
+        # ADVANCE EPISODE
+        # ====================================================
+
+        print()
+        print("=" * 60)
+        print("STEP 5: ADVANCING EPISODE")
+        print("=" * 60)
+
+        next_episode = advance_episode(
+            current_episode
         )
 
         # ====================================================
@@ -324,11 +457,13 @@ def main():
         print("=" * 60)
 
         print(
-            "Episode:",
-            episode.get(
-                "episode",
-                "Unknown"
-            )
+            "Completed episode:",
+            current_episode
+        )
+
+        print(
+            "Next episode:",
+            next_episode
         )
 
         print(
@@ -355,6 +490,19 @@ def main():
                 "YouTube upload result:",
                 upload_result
             )
+
+        print()
+        print(
+            "IMPORTANT:"
+        )
+
+        print(
+            "episode_state.json now contains:"
+        )
+
+        print(
+            f'{{"next_episode": {next_episode}}}'
+        )
 
         print("=" * 60)
 
@@ -386,11 +534,20 @@ def main():
 
         traceback.print_exc()
 
-        print("=" * 60)
+        print()
+        print(
+            "IMPORTANT:"
+        )
 
-        # IMPORTANT:
-        # Returning a non-zero exit code makes
-        # GitHub Actions show the workflow as FAILED.
+        print(
+            "Episode state was NOT advanced."
+        )
+
+        print(
+            "The same episode can be retried."
+        )
+
+        print("=" * 60)
 
         return 1
 
