@@ -10,11 +10,7 @@ SCOPES = [
 ]
 
 
-def get_youtube_service():
-
-    refresh_token = os.environ.get(
-        "YOUTUBE_REFRESH_TOKEN"
-    )
+def get_youtube():
 
     client_id = os.environ.get(
         "YOUTUBE_CLIENT_ID"
@@ -24,23 +20,27 @@ def get_youtube_service():
         "YOUTUBE_CLIENT_SECRET"
     )
 
-    if not refresh_token:
-        raise RuntimeError(
-            "YOUTUBE_REFRESH_TOKEN is missing"
-        )
+    refresh_token = os.environ.get(
+        "YOUTUBE_REFRESH_TOKEN"
+    )
 
     if not client_id:
         raise RuntimeError(
-            "YOUTUBE_CLIENT_ID is missing"
+            "YOUTUBE_CLIENT_ID is missing."
         )
 
     if not client_secret:
         raise RuntimeError(
-            "YOUTUBE_CLIENT_SECRET is missing"
+            "YOUTUBE_CLIENT_SECRET is missing."
+        )
+
+    if not refresh_token:
+        raise RuntimeError(
+            "YOUTUBE_REFRESH_TOKEN is missing."
         )
 
     credentials = Credentials(
-        None,
+        token=None,
         refresh_token=refresh_token,
         token_uri="https://oauth2.googleapis.com/token",
         client_id=client_id,
@@ -48,55 +48,68 @@ def get_youtube_service():
         scopes=SCOPES
     )
 
-    youtube = build(
+    return build(
         "youtube",
         "v3",
         credentials=credentials
     )
 
-    return youtube
 
+def upload_video(
+    video_file,
+    episode
+):
 
-def upload_video(video_file, episode):
-
-    youtube = get_youtube_service()
+    youtube = get_youtube()
 
     title = (
         f"{episode['title']} | "
-        f"Ramayana Episode {episode['episode']} #Shorts"
+        f"Ramayana Episode "
+        f"{episode['episode']} #Shorts"
     )
 
     description = (
-        f"Ramayana Episode {episode['episode']}\n\n"
+        f"Ramayana Episode "
+        f"{episode['episode']}\n\n"
+
         f"{episode['title']}\n\n"
-        f"Discover the timeless story of the Ramayana "
-        f"through a short daily episode.\n\n"
-        f"Subscribe for the next episode.\n\n"
-        f"#Ramayana #LordRama #Sita #HinduStories "
-        f"#IndianMythology #Shorts"
+
+        f"{episode['story']}\n\n"
+
+        "Follow the Ramayana journey "
+        "through a new short story every day.\n\n"
+
+        "#Ramayana #LordRama #Sita "
+        "#RamayanaStories #IndianMythology #Shorts"
     )
 
-    tags = [
-        "Ramayana",
-        "Lord Rama",
-        "Sita",
-        "Hindu Stories",
-        "Indian Mythology",
-        "Ramayana Stories",
-        "Indian Stories",
-        "Shorts"
-    ]
-
     body = {
+
         "snippet": {
+
             "title": title[:100],
+
             "description": description,
-            "tags": tags,
+
+            "tags": [
+                "Ramayana",
+                "Lord Rama",
+                "Sita",
+                "Ramayana Stories",
+                "Indian Mythology",
+                "Hindu Stories",
+                "Lord Ram",
+                "Indian Stories",
+                "Shorts"
+            ],
+
             "categoryId": "22"
         },
 
         "status": {
+
             "privacyStatus": "public",
+
             "selfDeclaredMadeForKids": False
         }
     }
@@ -107,7 +120,10 @@ def upload_video(video_file, episode):
         resumable=True
     )
 
-    print("Starting YouTube upload...")
+    print()
+    print("=" * 60)
+    print("STARTING YOUTUBE UPLOAD")
+    print("=" * 60)
 
     request = youtube.videos().insert(
         part="snippet,status",
@@ -122,9 +138,11 @@ def upload_video(video_file, episode):
         status, response = request.next_chunk()
 
         if status:
+
             print(
-                f"Upload progress: "
-                f"{int(status.progress() * 100)}%"
+                "Upload:",
+                int(status.progress() * 100),
+                "%"
             )
 
     video_id = response["id"]
@@ -137,7 +155,8 @@ def upload_video(video_file, episode):
     print("=" * 60)
     print("YOUTUBE UPLOAD SUCCESSFUL")
     print("=" * 60)
-    print(url)
+    print("Video ID:", video_id)
+    print("URL:", url)
     print("=" * 60)
 
     return url
