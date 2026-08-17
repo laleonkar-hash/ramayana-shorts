@@ -71,7 +71,8 @@ def create_scene(
     episode_font = get_font(42)
     small_font = get_font(30)
 
-    # Outer frame
+    # Border
+
     draw.rounded_rectangle(
         (
             45,
@@ -85,6 +86,7 @@ def create_scene(
     )
 
     # Decorative circles
+
     draw.ellipse(
         (
             120,
@@ -107,7 +109,8 @@ def create_scene(
         width=3
     )
 
-    # Om symbol
+    # Om
+
     draw.text(
         (
             WIDTH // 2,
@@ -119,7 +122,8 @@ def create_scene(
         anchor="mm"
     )
 
-    # Ramayana
+    # RAMAYANA
+
     draw.text(
         (
             WIDTH // 2,
@@ -132,6 +136,7 @@ def create_scene(
     )
 
     # Episode
+
     draw.text(
         (
             WIDTH // 2,
@@ -142,6 +147,8 @@ def create_scene(
         fill=(220, 190, 140),
         anchor="mm"
     )
+
+    # Title
 
     wrapped_title = textwrap.fill(
         title,
@@ -160,6 +167,8 @@ def create_scene(
         align="center"
     )
 
+    # Scene number
+
     draw.text(
         (
             WIDTH // 2,
@@ -176,10 +185,16 @@ def create_scene(
         f"scene_{scene_number}.png"
     )
 
-    image.save(filename)
+    image.save(
+        filename
+    )
 
     return filename
 
+
+# ============================================================
+# TEXT TO SPEECH
+# ============================================================
 
 async def generate_voice(
     text,
@@ -228,6 +243,10 @@ def generate_audio(text):
     )
 
 
+# ============================================================
+# GET AUDIO DURATION
+# ============================================================
+
 def get_duration(audio_file):
 
     command = [
@@ -253,6 +272,10 @@ def get_duration(audio_file):
     )
 
 
+# ============================================================
+# ADJUST AUDIO TO ~30 SECONDS
+# ============================================================
+
 def make_audio_30_seconds(
     audio_file
 ):
@@ -277,8 +300,8 @@ def make_audio_30_seconds(
             TARGET_DURATION
         )
 
-    # FFmpeg atempo supports values
-    # between 0.5 and 2.0.
+    # Don't allow extreme speeding.
+
     speed = max(
         1.0,
         min(
@@ -328,6 +351,10 @@ def make_audio_30_seconds(
     return adjusted_audio
 
 
+# ============================================================
+# CREATE VIDEO
+# ============================================================
+
 def create_video(episode):
 
     ensure_directories()
@@ -347,20 +374,22 @@ def create_video(episode):
         adjusted_audio
     )
 
-    # We always create exactly four scenes.
+    # Create four scenes.
+
     scene_files = []
 
     for scene_number in range(1, 5):
 
-        scene = create_scene(
-            episode["title"],
-            episode["episode"],
-            scene_number
+        scene_files.append(
+            create_scene(
+                episode["title"],
+                episode["episode"],
+                scene_number
+            )
         )
 
-        scene_files.append(scene)
+    # Divide video duration equally.
 
-    # Each scene gets an equal duration.
     scene_duration = (
         final_duration /
         len(scene_files)
@@ -391,8 +420,8 @@ def create_video(episode):
                 f"duration {scene_duration:.6f}\n"
             )
 
-        # concat demuxer needs the last file
-        # repeated without a duration.
+        # Required by FFmpeg concat demuxer.
+
         f.write(
             f"file '{os.path.abspath(scene_files[-1])}'\n"
         )
@@ -402,11 +431,13 @@ def create_video(episode):
         "final_short.mp4"
     )
 
-    # IMPORTANT:
-    # Do NOT escape the colon between the
-    # subtitle filename and force_style.
+    # ========================================================
+    # SUBTITLE FILTER
     #
-    # This was the problem in the previous version.
+    # IMPORTANT:
+    # There is NO backslash before the colon
+    # between filename and force_style.
+    # ========================================================
 
     subtitle_path = os.path.abspath(
         subtitle_file
@@ -417,8 +448,6 @@ def create_video(episode):
         "/"
     )
 
-    # Escape characters that matter inside
-    # the FFmpeg filter expression.
     subtitle_path = subtitle_path.replace(
         "'",
         r"\'"
@@ -486,7 +515,7 @@ def create_video(episode):
         "128k",
 
         "-t",
-        f"{TARGET_DURATION}",
+        "30",
 
         "-pix_fmt",
         "yuv420p",
@@ -499,8 +528,6 @@ def create_video(episode):
 
     print()
     print("Creating 1080x1920 Short...")
-
-    print()
     print("Running FFmpeg...")
 
     try:
@@ -514,11 +541,11 @@ def create_video(episode):
 
         print()
         print("=" * 60)
-        print("FFMPEG VIDEO CREATION FAILED")
+        print("FFMPEG FAILED")
         print("=" * 60)
 
         print(
-            "Command used:"
+            "Command:"
         )
 
         print(
@@ -540,13 +567,13 @@ def create_video(episode):
     )
 
     print(
-        "Duration:",
-        f"{TARGET_DURATION:.0f} seconds"
+        "Resolution:",
+        "1080x1920"
     )
 
     print(
-        "Resolution:",
-        "1080x1920"
+        "Target duration:",
+        "30 seconds"
     )
 
     print("=" * 60)
