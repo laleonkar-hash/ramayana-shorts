@@ -1,565 +1,118 @@
+import datetime
+import json
 import os
+import shutil
+import subprocess
 import sys
 import traceback
 
-from story_generator import (
-    get_next_episode,
-    load_state,
-    save_state
-)
-
-from video_creator import create_video
-from youtube_uploader import upload_video
+import config
+import images
+import story_generator as sg
+import video_creator
+import voice
+import youtube_uploader
 
 
-# ============================================================
-# CONFIGURATION
-# ============================================================
-
-MIN_STORY_WORDS = 20
-
-
-# ============================================================
-# PRINT HEADER
-# ============================================================
-
-def print_header():
-
-    print()
-    print("=" * 60)
-    print("DAILY RAMAYANA SHORT")
-    print("=" * 60)
-    print("Language : Marathi")
-    print("Format   : YouTube Short")
-    print("Duration : Full narration")
-    print("=" * 60)
+def preflight():
+    missing = [n for n, v in (("GEMINI_API_KEY", config.GEMINI_API_KEY), ("CF_ACCOUNT_ID", config.CF_ACCOUNT_ID),
+                              ("CF_API_TOKEN", config.CF_API_TOKEN)) if not v]
+    if not config.DRY_RUN:
+        missing += [n for n in ("YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET", "YOUTUBE_REFRESH_TOKEN")
+                    if not getattr(config, n)]
+    if missing:
+        raise RuntimeError("Missing secrets: " + ", ".join(missing))
+    if not os.path.exists(config.PORTRAIT):
+        raise RuntimeError(f"{config.PORTRAIT} is missing (needed for the closing card).")
+    fonts = subprocess.run(["fc-list", ":lang=mr"], capture_output=True, text=True).stdout.strip()
+    if not fonts:
+        raise RuntimeError("No Marathi/Devanagari font installed (apt install fonts-noto-core).")
+    for tool in ("ffmpeg", "ffprobe"):
+        if not shutil.which(tool):
+            raise RuntimeError(f"{tool} not found.")
 
 
-# ============================================================
-# VALIDATE GENERATED STORY
-# ============================================================
-
-def validate_story(episode):
-
-    if not episode:
-
-        raise RuntimeError(
-            "Story generator returned no episode."
-        )
-
-    story = episode.get(
-        "story",
-        ""
-    )
-
-    if story is None:
-
-        raise RuntimeError(
-            "Story generator returned an empty story."
-        )
-
-    story = str(
-        story
-    ).strip()
-
-    print()
-    print("=" * 60)
-    print("STORY BEING SENT TO TTS")
-    print("=" * 60)
-
-    print(story)
-
-    print("=" * 60)
-
-    # --------------------------------------------------------
-    # Empty story
-    # --------------------------------------------------------
-
-    if not story:
-
-        raise RuntimeError(
-            "STOPPING: Generated story is empty."
-        )
-
-    # --------------------------------------------------------
-    # Count words
-    # --------------------------------------------------------
-
-    words = story.split()
-
-    word_count = len(
-        words
-    )
-
-    print()
-    print(
-        f"Story word count: {word_count}"
-    )
-
-    # --------------------------------------------------------
-    # Meaningful characters
-    # --------------------------------------------------------
-
-    meaningful_characters = [
-        character
-        for character in story
-        if character.isalnum()
-        or
-        (
-            "\u0900"
-            <= character
-            <= "\u097F"
-        )
-    ]
-
-    if len(
-        meaningful_characters
-    ) < 20:
-
-        raise RuntimeError(
-            "STOPPING: Generated story does not "
-            "contain enough meaningful text."
-        )
-
-    # --------------------------------------------------------
-    # Minimum words
-    # --------------------------------------------------------
-
-    if word_count < MIN_STORY_WORDS:
-
-        raise RuntimeError(
-            "STOPPING: Generated story is too short. "
-            f"Only {word_count} words were generated. "
-            f"Minimum required: {MIN_STORY_WORDS}."
-        )
-
-    # --------------------------------------------------------
-    # Punctuation-only response
-    # --------------------------------------------------------
-
-    if story in [
-        ".",
-        "।",
-        "...",
-        "....",
-        "....."
-    ]:
-
-        raise RuntimeError(
-            "STOPPING: Gemini returned only punctuation."
-        )
-
-    print()
-    print(
-        "Story validation: PASSED"
-    )
-
-    return story
-
-
-# ============================================================
-# PRINT EPISODE INFORMATION
-# ============================================================
-
-def print_episode_info(
-    episode
-):
-
-    print()
-    print("=" * 60)
-    print("SELECTED RAMAYANA EPISODE")
-    print("=" * 60)
-
-    print(
-        "Episode:",
-        episode.get(
-            "episode",
-            "Unknown"
-        )
-    )
-
-    print(
-        "Title:",
-        episode.get(
-            "title",
-            "Unknown"
-        )
-    )
-
-    print(
-        "Language:",
-        "Marathi"
-    )
-
-    print("=" * 60)
-
-
-# ============================================================
-# ADVANCE EPISODE
-# ============================================================
-
-def advance_episode(
-    current_episode
-):
-
+def log_upload(entry):
     try:
+        with open(config.LOG_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        data = []
+    data.append(entry)
+    sg._atomic_write(config.LOG_FILE, data)
 
-        current_episode = int(
-            current_episode
-        )
-
-    except (
-        ValueError,
-        TypeError
-    ):
-
-        raise RuntimeError(
-            "Invalid current episode number: "
-            f"{current_episode}"
-        )
-
-    next_episode = (
-        current_episode + 1
-    )
-
-    save_state(
-        next_episode
-    )
-
-    print()
-    print("=" * 60)
-    print("EPISODE STATE UPDATED")
-    print("=" * 60)
-
-    print(
-        "Completed episode:",
-        current_episode
-    )
-
-    print(
-        "Next episode:",
-        next_episode
-    )
-
-    print(
-        "State file:",
-        "episode_state.json"
-    )
-
-    print("=" * 60)
-
-    return next_episode
-
-
-# ============================================================
-# MAIN PIPELINE
-# ============================================================
 
 def main():
+    print("=" * 60, "\nDAILY RAMAYANA SHORT (v2: scenes, voices, hook-first)\n" + "=" * 60)
+    preflight()
 
-    print_header()
+    print("\n1/5 Choosing episode + writing script")
+    episode, previous, following, number = sg.get_next_episode()
+    print(f"Episode {number}: {episode['title']}")
+    script = sg.generate_script(episode, previous, following)
+    print("Title:", script["title"], "| attire:", script["attire"], "| location:", script["location"])
 
-    video_file = None
+    outdir = os.path.join(config.OUT_DIR, f"ep{number:03d}")
+    shutil.rmtree(outdir, ignore_errors=True)
+    os.makedirs(outdir)
+    with open(os.path.join(outdir, "script.json"), "w", encoding="utf-8") as f:
+        json.dump(script, f, ensure_ascii=False, indent=2)
+    for i, sc in enumerate(script["scenes"], 1):
+        print(f"  {i}. [{sc['speaker']}] {sc['text']}")
 
-    try:
+    print("\n2/5 Drawing scenes + recording voices")
+    base_seed = (number * 1009 + datetime.date.today().toordinal()) % 900000 + 1000
+    scenes, failed = [], 0
+    last_index = len(script["scenes"]) - 1
+    for i, sc in enumerate(script["scenes"]):
+        img, aud = f"scene{i:02d}.jpg", f"scene{i:02d}.wav"
+        img_path = os.path.join(outdir, img)
+        if i == last_index:
+            images.save_portrait(img_path)                       # closing card = your Rama portrait
+        elif not images.make_image(sc, script["attire"], script["location"], img_path, base_seed + i * 101):
+            failed += 1
+            if failed > 3:
+                raise RuntimeError("More than 3 pictures failed (Cloudflare quota or outage). Nothing uploaded.")
+            if i > 0 and os.path.exists(os.path.join(outdir, f"scene{i - 1:02d}.jpg")):
+                shutil.copy(os.path.join(outdir, f"scene{i - 1:02d}.jpg"), img_path)
+            else:
+                images.save_portrait(img_path)
+        dur, profile = voice.synth(sc["text"], os.path.join(outdir, aud), sc["speaker"])
+        scenes.append({"image": img, "audio": aud, "dur": dur, "text": sc["text"], "profile": profile,
+                       "motion": sc["motion"], "sfx": sc["sfx"]})
+        print(f"   scene {i + 1}/{len(script['scenes'])} ready ({dur:.1f}s, voice={profile})")
 
-        # ====================================================
-        # STEP 1
-        # GET NEXT EPISODE + GENERATE STORY
-        # ====================================================
+    total = sum(s["dur"] + config.SCENE_PAD for s in scenes)
+    print(f"\nTotal narration: {total:.1f}s")
+    if not 20 <= total <= 120:
+        raise RuntimeError(f"Video length {total:.1f}s is outside the safe range (20-120s). Nothing uploaded.")
 
-        print()
-        print("=" * 60)
-        print("STEP 1: GENERATING STORY")
-        print("=" * 60)
+    print("\n3/5 Rendering video")
+    final = video_creator.build(scenes, outdir, number)
 
-        # ----------------------------------------------------
-        # Remember the state BEFORE this run.
-        # ----------------------------------------------------
-
-        state_before = load_state()
-
-        print(
-            "Episode state before run:",
-            state_before
-        )
-
-        # ----------------------------------------------------
-        # Generate the episode.
-        # ----------------------------------------------------
-
-        episode = get_next_episode()
-
-        if not episode:
-
-            raise RuntimeError(
-                "No episode was returned."
-            )
-
-        print_episode_info(
-            episode
-        )
-
-        # ----------------------------------------------------
-        # Verify selected episode.
-        # ----------------------------------------------------
-
-        current_episode = episode.get(
-            "episode"
-        )
-
-        if current_episode is None:
-
-            raise RuntimeError(
-                "Selected episode has no episode number."
-            )
-
-        try:
-
-            current_episode = int(
-                current_episode
-            )
-
-        except (
-            ValueError,
-            TypeError
-        ):
-
-            raise RuntimeError(
-                "Invalid episode number: "
-                f"{current_episode}"
-            )
-
-        # ====================================================
-        # STEP 2
-        # VALIDATE STORY
-        # ====================================================
-
-        print()
-        print("=" * 60)
-        print("STEP 2: VALIDATING STORY")
-        print("=" * 60)
-
-        validate_story(
-            episode
-        )
-
-        # ====================================================
-        # STEP 3
-        # CREATE VIDEO
-        # ====================================================
-
-        print()
-        print("=" * 60)
-        print("STEP 3: CREATING VIDEO")
-        print("=" * 60)
-
-        video_file = create_video(
-            episode
-        )
-
-        if not video_file:
-
-            raise RuntimeError(
-                "Video creator returned no video file."
-            )
-
-        if not os.path.exists(
-            video_file
-        ):
-
-            raise RuntimeError(
-                f"Video file does not exist: "
-                f"{video_file}"
-            )
-
-        video_size = os.path.getsize(
-            video_file
-        )
-
-        if video_size < 10000:
-
-            raise RuntimeError(
-                "Generated video is too small "
-                "or invalid."
-            )
-
-        print()
-        print(
-            "Video created successfully:"
-        )
-
-        print(
-            video_file
-        )
-
-        print(
-            f"Video size: "
-            f"{video_size / 1024 / 1024:.2f} MB"
-        )
-
-        # ====================================================
-        # STEP 4
-        # UPLOAD TO YOUTUBE
-        # ====================================================
-
-        print()
-        print("=" * 60)
-        print("STEP 4: UPLOADING TO YOUTUBE")
-        print("=" * 60)
-
-        print(
-            "Uploading:"
-        )
-
-        print(
-            video_file
-        )
-
-        # ----------------------------------------------------
-        # IMPORTANT:
-        #
-        # This function must finish successfully before
-        # we advance the episode.
-        # ----------------------------------------------------
-
-        upload_result = upload_video(
-            video_file,
-            episode
-        )
-
-        print()
-        print(
-            "YouTube upload completed successfully."
-        )
-
-        # ====================================================
-        # STEP 5
-        # ADVANCE EPISODE
-        # ====================================================
-
-        print()
-        print("=" * 60)
-        print("STEP 5: ADVANCING EPISODE")
-        print("=" * 60)
-
-        next_episode = advance_episode(
-            current_episode
-        )
-
-        # ====================================================
-        # SUCCESS
-        # ====================================================
-
-        print()
-        print("=" * 60)
-        print("PIPELINE COMPLETED SUCCESSFULLY")
-        print("=" * 60)
-
-        print(
-            "Completed episode:",
-            current_episode
-        )
-
-        print(
-            "Next episode:",
-            next_episode
-        )
-
-        print(
-            "Title:",
-            episode.get(
-                "title",
-                "Unknown"
-            )
-        )
-
-        print(
-            "Language:",
-            "Marathi"
-        )
-
-        print(
-            "Video:",
-            video_file
-        )
-
-        if upload_result:
-
-            print(
-                "YouTube upload result:",
-                upload_result
-            )
-
-        print()
-        print(
-            "IMPORTANT:"
-        )
-
-        print(
-            "episode_state.json now contains:"
-        )
-
-        print(
-            f'{{"next_episode": {next_episode}}}'
-        )
-
-        print("=" * 60)
-
+    if config.DRY_RUN:
+        print("\nDRY_RUN: video saved at", final, "- not uploaded, episode not advanced.")
         return 0
 
-    # ========================================================
-    # ERROR HANDLING
-    # ========================================================
+    print("\n4/5 Uploading to YouTube")
+    vid = youtube_uploader.upload_video(final, script, number, os.path.join(outdir, "scene00.jpg"))
 
-    except Exception as error:
+    print("\n5/5 Saving progress")
+    if config.EPISODE_OVERRIDE:
+        print("EPISODE_OVERRIDE used: saved state left unchanged.")
+    else:
+        sg.save_state(number + 1)
+        log_upload({"episode": number, "title": script["title"], "video_id": vid,
+                    "date": datetime.date.today().isoformat()})
+        print(f"Next episode: {number + 1}")
+    print("DONE.")
+    return 0
 
-        print()
-        print("=" * 60)
-        print("PIPELINE FAILED")
-        print("=" * 60)
-
-        print(
-            "Error:"
-        )
-
-        print(
-            str(error)
-        )
-
-        print()
-        print(
-            "Traceback:"
-        )
-
-        traceback.print_exc()
-
-        print()
-        print(
-            "IMPORTANT:"
-        )
-
-        print(
-            "Episode state was NOT advanced."
-        )
-
-        print(
-            "The same episode can be retried."
-        )
-
-        print("=" * 60)
-
-        return 1
-
-
-# ============================================================
-# ENTRY POINT
-# ============================================================
 
 if __name__ == "__main__":
-
-    exit_code = main()
-
-    sys.exit(
-        exit_code
-    )
+    try:
+        sys.exit(main())
+    except Exception as exc:  # noqa: BLE001
+        print("\n" + "=" * 60, "\nPIPELINE FAILED:", exc, "\nEpisode state was NOT advanced; the same episode will retry.\n" + "=" * 60)
+        traceback.print_exc()
+        sys.exit(1)

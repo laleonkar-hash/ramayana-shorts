@@ -1,349 +1,336 @@
+"""Episode selection + Gemini script writing.
+
+Output of generate_script() is a dict:
+  title, description, tags, comment_question, attire, location, teaser,
+  scenes: [{speaker, text, characters, image_prompt, motion, sfx}]   (last scene = closing card)
+"""
 import json
 import os
+import re
 import time
-from datetime import datetime
 
-from google import genai
+import characters as cast
+import config
 
+MOTIONS = ["zoom_in", "zoom_out", "pan_left", "pan_right", "pan_up", "pan_down", "shake", "punch"]
+SFX = ["whoosh", "bell", "drum", "crash", "sparkle", "none"]
 
-# ============================================================
-# CONFIGURATION
-# ============================================================
-
-EPISODES_FILE = "ramayana_episodes.json"
-STATE_FILE = "episode_state.json"
-
-MODELS = [
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-2.5-flash",
+HOOKS = [
+    "open with a startling QUESTION that makes people need the answer (a mystery about this moment)",
+    "open with the MOST DRAMATIC moment of the episode first (in the middle of the crisis), then tell how it came to that",
+    "open with a bold, surprising FACT or contrast that most people do not know about this moment",
+    "open with an EMOTIONAL line spoken by a character at the peak of the crisis",
+]
+ENDINGS = [
+    "ask viewers one simple question about the episode so they comment, then say the next episode is coming",
+    "ask viewers to comment 'जय श्री राम' if they felt this moment in their heart, then tease the next episode",
+    "give a one-line lesson (dharma) from the episode, then tease the next episode and ask viewers to follow",
 ]
 
 
-# ============================================================
-# LOAD & SAVE EPISODES
-# ============================================================
-
+# ============================================================ files / state
 def load_episodes():
-    if not os.path.exists(EPISODES_FILE):
-        raise RuntimeError(f"{EPISODES_FILE} was not found.")
-
-    with open(EPISODES_FILE, "r", encoding="utf-8") as f:
+    if not os.path.exists(config.EPISODES_FILE):
+        raise RuntimeError(f"{config.EPISODES_FILE} was not found.")
+    with open(config.EPISODES_FILE, encoding="utf-8") as f:
         data = json.load(f)
+    if isinstance(data, dict):
+        data = data.get("episodes", [])
+    if not isinstance(data, list) or not data:
+        raise RuntimeError(f"{config.EPISODES_FILE} must contain a non-empty list.")
+    return data
 
-    if isinstance(data, list):
-        return data
 
-    if isinstance(data, dict) and "episodes" in data and isinstance(data["episodes"], list):
-        return data["episodes"]
-
-    raise RuntimeError("ramayana_episodes.json must contain a list or an 'episodes' list.")
+def _atomic_write(path, obj):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(obj, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, path)
 
 
 def save_episodes(episodes):
-    """Saves updated episode list back to ramayana_episodes.json"""
-    with open(EPISODES_FILE, "w", encoding="utf-8") as f:
-        json.dump(episodes, f, indent=2, ensure_ascii=False)
+    _atomic_write(config.EPISODES_FILE, episodes)
 
-
-# ============================================================
-# EPISODE HELPERS
-# ============================================================
-
-def get_episode_number(item):
-    for key in ["episode", "episode_number", "number", "id"]:
-        if key in item:
-            try:
-                return int(item[key])
-            except (ValueError, TypeError):
-                continue
-    raise RuntimeError("No valid episode number found.")
-
-
-def get_episode_title(item):
-    for key in ["title", "name", "episode_title"]:
-        if key in item:
-            value = str(item[key]).strip()
-            if value:
-                return value
-    return "Ramayana Story"
-
-
-def get_episode_source(item):
-    for key in ["story", "description", "summary", "content"]:
-        if key in item:
-            value = str(item[key]).strip()
-            if value:
-                return value
-    raise RuntimeError("No story/description/summary/content found for episode.")
-
-
-# ============================================================
-# EPISODE STATE
-# ============================================================
 
 def load_state():
-    if not os.path.exists(STATE_FILE):
-        return 1
-
     try:
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
-            state = json.load(f)
-        return max(1, int(state.get("next_episode", 1)))
+        with open(config.STATE_FILE, encoding="utf-8") as f:
+            return max(1, int(json.load(f).get("next_episode", 1)))
     except Exception:
-        print("WARNING: episode_state.json could not be read. Defaulting to 1.")
+        print("WARNING: episode_state.json missing/unreadable -> starting at episode 1")
         return 1
 
 
 def save_state(next_episode):
-    state = {"next_episode": int(next_episode)}
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2, ensure_ascii=False)
+    _atomic_write(config.STATE_FILE, {"next_episode": int(next_episode)})
 
 
-# ============================================================
-# FIND EPISODE
-# ============================================================
-
-def find_episode(episodes, episode_number):
-    for item in episodes:
+def find_episode(episodes, number):
+    for e in episodes:
         try:
-            if get_episode_number(item) == episode_number:
-                return item
-        except Exception:
+            if int(e.get("episode")) == int(number):
+                return e
+        except (TypeError, ValueError):
             continue
     return None
 
 
-# ============================================================
-# GEMINI CLIENT & API CALL
-# ============================================================
-
-def create_gemini_client():
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
+# ============================================================ Gemini
+def _client():
+    if not config.GEMINI_API_KEY:
         raise RuntimeError("GEMINI_API_KEY is missing.")
-    return genai.Client(api_key=api_key)
+    from google import genai
+    return genai.Client(api_key=config.GEMINI_API_KEY)
 
 
-def generate_with_fallback(client, prompt):
-    last_error = None
-
-    for model in MODELS:
-        print("\n" + "=" * 60)
-        print(f"TRYING GEMINI MODEL: {model}")
-        print("=" * 60)
-
+def _ask_json(prompt, temperature=0.9):
+    """Call Gemini (model fallback + retries on temporary errors) and return parsed JSON."""
+    from google.genai import types
+    client = _client()
+    last = None
+    for model in config.GEMINI_MODELS:
         for attempt in range(1, 4):
             try:
-                print(f"Attempt {attempt}/3")
-                response = client.models.generate_content(
-                    model=model,
-                    contents=prompt
-                )
-
-                if response is None:
-                    raise RuntimeError("Gemini returned no response.")
-
-                text = getattr(response, "text", None)
-                if text and text.strip():
-                    print(f"SUCCESS: {model}")
-                    return response
-
-                raise RuntimeError("Gemini returned an empty response.")
-
-            except Exception as error:
-                last_error = error
-                error_text = str(error)
-                print(f"\n{model} attempt {attempt} failed: {error_text}")
-
-                temporary_error = any(err in error_text for err in ["503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "500", "502", "504"])
-
-                if temporary_error:
-                    wait_seconds = 5 * attempt
-                    print(f"Waiting {wait_seconds} seconds...")
-                    time.sleep(wait_seconds)
+                print(f"   Gemini {model} (try {attempt}/3)")
+                resp = client.models.generate_content(
+                    model=model, contents=prompt,
+                    config=types.GenerateContentConfig(response_mime_type="application/json", temperature=temperature))
+                text = (getattr(resp, "text", None) or "").strip()
+                if not text:
+                    raise RuntimeError("empty response")
+                text = re.sub(r"^```(?:json)?|```$", "", text, flags=re.M).strip()
+                return json.loads(text)
+            except Exception as e:  # noqa: BLE001
+                last = e
+                msg = str(e)
+                print(f"   -> failed: {msg[:200]}")
+                temporary = any(k in msg for k in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "500", "502", "504",
+                                                  "Expecting", "JSON", "empty response", "timed out", "Timeout"))
+                if temporary:
+                    time.sleep(6 * attempt)
                     continue
-
-                raise RuntimeError(f"Gemini API request failed: {error}") from error
-
-        print(f"\nAll retries failed for {model}. Trying fallback model...")
-
-    raise RuntimeError(f"All Gemini models failed. Last error: {last_error}")
+                break  # e.g. unknown model -> try the next model
+    raise RuntimeError(f"All Gemini models failed. Last error: {last}")
 
 
-# ============================================================
-# AUTO-GENERATE NEW EPISODE OUTLINE WHEN FILE RUNS OUT
-# ============================================================
+# ============================================================ prompts
+def _script_prompt(ep, prev_title, next_title, notes=""):
+    n = config.NUM_SCENES
+    hook = HOOKS[int(ep["episode"]) % len(HOOKS)]
+    ending = ENDINGS[int(ep["episode"]) % len(ENDINGS)]
+    keys = ", ".join(cast.CAST_KEYS)
+    teaser = f'Next episode: "{next_title}".' if next_title else "This is the latest episode; just say the story continues soon."
+    return f"""You are the head writer of a hugely popular MARATHI YouTube Shorts channel that retells the Valmiki Ramayana as a gripping, emotional, cinematic daily series. Viewers swipe away in 2 seconds unless the first line grabs them, so every second must earn attention.
 
-def generate_new_episode_data(episode_number, previous_episodes):
-    """Generates next Ramayana episode title and summary when JSON runs out."""
-    client = create_gemini_client()
-    
-    last_5_episodes = previous_episodes[-5:]
-    summary_context = "\n".join([f"Episode {get_episode_number(e)}: {get_episode_title(e)} - {get_episode_source(e)}" for e in last_5_episodes])
+EPISODE {ep['episode']}: {ep['title']}
+FACTS (source of truth, do not contradict): {ep['story']}
+Previous episode: {prev_title or 'none (this is the start of the series)'}
+{teaser}
 
-    prompt = f"""
-You are an expert on the epic Ramayana.
-We are creating a daily chronological episode series.
+Write ONE script of EXACTLY {n} scenes (about 45 seconds when spoken).
 
-Previous Episodes Context:
-{summary_context}
+STRUCTURE
+- Scene 1 = HOOK, 6-12 words. {hook}. Never start with a greeting, a title or "आजच्या भागात".
+- Scenes 2 to {n-1}: the story as a chain of vivid moments. Each scene = one new picture and ONE idea. Escalate emotion and curiosity; hold a surprise for the second half.
+- At least 3 scenes must be DIRECT SPEECH in a character's own words (first person, short and powerful, e.g. Rama, Sita, Hanuman, Ravana speaking). The rest are the narrator.
+- Scene {n} = CLOSING CARD, 14-20 words: {ending}. It must mention the next episode. Its speaker is "narrator". Do not describe any picture for it.
 
-Generate Episode Number: {episode_number}
+LANGUAGE RULES for the spoken "text"
+- Only Marathi in Devanagari. Natural, simple, spoken Marathi that an ordinary Maharashtrian viewer loves, warm and dramatic, not stiff or bookish.
+- No English words, no digits (write numbers in words), no emoji, no brackets, no quotation marks. Use only these punctuation marks: , . ? ! (they create natural pauses for the voice).
+- Spell names exactly: राम, सीता, लक्ष्मण, हनुमान, रावण, दशरथ, कैकेयी, कौसल्या, भरत, सुग्रीव, वाली, जटायू, विभीषण, कुंभकर्ण, इंद्रजित, मंदोदरी, शूर्पणखा, मारीच, शबरी, जनक, विश्वामित्र, अयोध्या, लंका.
+- Each normal scene: 8-16 words. Total for all scenes: 90-130 words.
 
-What is the NEXT logical chronological event/story in the Ramayana directly following the context above?
+CONTENT RULES
+- Stay faithful to the Ramayana and the FACTS above. Do not invent new events. Do not insult any person, community or religion. Tone: reverent, emotional, heroic.
+- Never mention AI, Gemini, prompts, scripts or "episode summary".
 
-Respond strictly in JSON format with two keys:
-"title": "<English title for Episode {episode_number}>",
-"story": "<English brief summary of this episode's event (2-3 sentences)>"
+PICTURES: for every scene except the last, give "image_prompt" in ENGLISH: ONE clear visual moment (action, emotion, camera angle such as close-up or wide shot, lighting). Do NOT describe faces or clothes of known characters, the computer adds that. No blood, gore, nudity or cruelty: show battles with glowing arrows, dust, fire and light. No text in the picture. Keep "location" the same visual world through the episode.
+"characters": list of 1-2 keys from this list that are visible in that picture (the first one is the main subject): {keys}.
+"speaker": "narrator" or exactly one key from the same list (the one who speaks the line).
+"attire": for Rama, Sita and Lakshmana choose the outfit that fits THIS episode: "palace" (Ayodhya / Mithila / coronation), "forest" (exile, Panchavati, Kishkindha, Lanka captivity) or "war" (battle of Lanka).
+"motion": one of {', '.join(MOTIONS)} (shake for crashes and fights, punch for shocks and the hook, pans for journeys, zoom_in for emotion).
+"sfx": one of {', '.join(SFX)} (use none on about half of the scenes; bell for divine moments, drum for tension, crash for fights, whoosh for flying, sparkle for miracles).
 
-Do NOT output Markdown formatting or backticks, return raw JSON string only.
-"""
-    print(f"\nGenerating new Ramayana episode outline for Episode {episode_number}...")
-    response = generate_with_fallback(client, prompt)
-    clean_json = response.text.strip().replace("```json", "").replace("```", "").strip()
-    
-    parsed = json.loads(clean_json)
-    
-    new_episode = {
-        "episode": episode_number,
-        "title": parsed["title"],
-        "story": parsed["story"]
-    }
-    
-    # Append and save to file
-    previous_episodes.append(new_episode)
-    save_episodes(previous_episodes)
-    print(f"New Episode {episode_number} added and saved to {EPISODES_FILE}!")
-    
-    return new_episode
-
-
-# ============================================================
-# GENERATE FULL MARATHI STORY
-# ============================================================
-
-def generate_story(episode):
-    client = create_gemini_client()
-    episode_number = get_episode_number(episode)
-    episode_title = get_episode_title(episode)
-    source_story = get_episode_source(episode)
-
-    today = datetime.utcnow().strftime("%Y-%m-%d")
-
-    prompt = f"""
-तुम्ही रामायणातील कथा सांगणारे एक उत्कृष्ट मराठी कथाकार आहात.
-दररोज एका रामायणाच्या भागावर आधारित YouTube Short तयार करायचा आहे.
-
-आजची तारीख: {today}
-भाग क्रमांक: {episode_number}
-भागाचे शीर्षक: {episode_title}
-या भागाची संपूर्ण माहिती: {source_story}
-
-तुमचे काम: वरील माहितीच्या आधारावर या भागाची एक पूर्ण, सुंदर आणि भावनिक कथा तयार करा.
-
-अत्यंत महत्त्वाचे नियम:
-1. संपूर्ण कथा फक्त मराठी भाषेत लिहा.
-2. कथा नैसर्गिक, शुद्ध आणि बोलण्यासाठी योग्य मराठीत असावी.
-3. कथा केवळ सारांशासारखी वाटता कामा नये.
-4. कथा साधारण 75 ते 90 मराठी शब्दांची असावी.
-5. "AI", "Gemini", "script", "prompt", "source" यांचा उल्लेख करू नका.
-
-OUTPUT EXACTLY:
-TITLE:
-<मराठी YouTube Shorts शीर्षक>
-
-STORY:
-<पूर्ण मराठी कथा>
-"""
-
-    print("\n" + "=" * 60)
-    print("GEMINI MARATHI STORY GENERATION")
-    print(f"Episode: {episode_number} - {episode_title}")
-    print("=" * 60)
-
-    response = generate_with_fallback(client, prompt)
-    text = response.text.strip()
-
-    title = ""
-    story_lines = []
-    collecting_story = False
-
-    for line in text.splitlines():
-        clean = line.strip()
-        if not clean:
-            continue
-        upper = clean.upper()
-
-        if upper.startswith("TITLE:") or upper.startswith("TITLE :"):
-            title = clean.split(":", 1)[1].strip()
-            collecting_story = False
-            continue
-
-        if upper.startswith("STORY:") or upper.startswith("STORY :"):
-            first_part = clean.split(":", 1)[1].strip()
-            if first_part:
-                story_lines.append(first_part)
-            collecting_story = True
-            continue
-
-        if collecting_story:
-            story_lines.append(clean)
-
-    story = " ".join(" ".join(story_lines).split())
-    title = " ".join(title.split()) or episode_title
-
-    if not story:
-        raise RuntimeError("Could not extract story from Gemini response.")
-
-    return {
-        "episode": episode_number,
-        "source_title": episode_title,
-        "title": title,
-        "story": story
-    }
+TITLE: Marathi, 30-55 characters, curiosity hook first, ends with exactly one fitting emoji. Do not put the words episode or भाग in it.
+{notes}
+Return ONLY valid JSON of exactly this shape:
+{{
+  "title": "...",
+  "description": "2-3 Marathi sentences for the YouTube description",
+  "tags": ["10 to 12 short search tags, mixing Marathi and English, e.g. Ramayana, रामायण, Lord Rama"],
+  "comment_question": "one simple Marathi question for viewers, max 12 words",
+  "attire": "palace | forest | war",
+  "location": "ENGLISH: one concrete visual setting that stays consistent through the episode",
+  "scenes": [{{"speaker": "...", "text": "...", "characters": ["..."], "image_prompt": "...", "motion": "...", "sfx": "..."}}]
+}}"""
 
 
-# ============================================================
-# SELECT NEXT EPISODE
-# ============================================================
+def _director_prompt(ep, script):
+    return f"""You are the director and final editor of a Marathi YouTube Shorts series on the Valmiki Ramayana. Improve the script below WITHOUT changing the number or order of scenes.
+
+FACTS (source of truth): {ep['story']}
+
+SCRIPT:
+{json.dumps(script, ensure_ascii=False)}
+
+Do all of this:
+1. Scene 1 must be an irresistible hook within 2 seconds of speech. If it is weak, rewrite it.
+2. Fix any factual mistake against the FACTS and the Ramayana; fix contradictions; make every scene follow from the previous one.
+3. Make the Marathi natural, spoken, emotional and grammatically perfect. Keep speech lines short and punchy. Only Marathi Devanagari, no digits, no English, no emoji, only , . ? ! punctuation.
+4. Each "image_prompt" (ENGLISH) must show EXACTLY what that line says at that moment, with the right "characters" visible. Keep it non-violent (no blood or gore). Do not describe faces or clothes of known characters.
+5. Keep "speaker", "characters", "motion", "sfx" valid and unchanged unless a fix needs it. Title: 30-55 characters, hook first, one emoji at the end.
+6. The last scene stays the closing card (14-20 words, mentions the next episode).
+
+Return ONLY valid JSON with the same shape as the SCRIPT (title, description, tags, comment_question, attire, location, scenes)."""
+
+
+# ============================================================ validation / cleanup
+_DEV = re.compile(r"[\u0900-\u097F]")
+_LAT = re.compile(r"[A-Za-z]")
+_BAD = re.compile(r"\b(AI|Gemini|prompt|script)\b", re.I)
+
+
+def _clean_text(text):
+    text = str(text or "")
+    text = re.sub(r"[\"“”‘’'`()\[\]{}*_#<>]", "", text)
+    text = re.sub(r"[\U00010000-\U0010FFFF\u2600-\u27BF]", "", text)        # emoji
+    text = text.replace("…", ".").replace("।", ".").replace("॥", ".")
+    text = re.sub(r"\.{2,}", ".", text)
+    return " ".join(text.split())
+
+
+def normalize_script(script):
+    """Fix small things instead of failing: aliases, invalid motion/sfx, speaker always visible."""
+    attire = str(script.get("attire", "forest")).lower().strip()
+    script["attire"] = attire if attire in ("palace", "forest", "war") else "forest"
+    for i, sc in enumerate(script["scenes"]):
+        sc["text"] = _clean_text(sc.get("text"))
+        speaker = cast.normalize(sc.get("speaker"))
+        sc["speaker"] = speaker or "narrator"
+        chars = []
+        for c in sc.get("characters") or []:
+            k = cast.normalize(c)
+            if k and k != "narrator" and k not in chars:
+                chars.append(k)
+        if sc["speaker"] != "narrator" and sc["speaker"] not in chars:
+            chars.insert(0, sc["speaker"])
+        sc["characters"] = chars[:2]
+        sc["image_prompt"] = " ".join(str(sc.get("image_prompt") or "").split())
+        sc["motion"] = sc.get("motion") if sc.get("motion") in MOTIONS else ["zoom_in", "pan_right", "zoom_out", "pan_left"][i % 4]
+        sc["sfx"] = sc.get("sfx") if sc.get("sfx") in SFX else "none"
+    last = script["scenes"][-1]
+    last["speaker"], last["characters"], last["motion"] = "narrator", [], "zoom_in"
+    script["tags"] = [str(t).strip().lstrip("#") for t in (script.get("tags") or []) if str(t).strip()][:15]
+    script["title"] = " ".join(str(script.get("title", "")).split())
+    script["description"] = " ".join(str(script.get("description", "")).split())
+    script["comment_question"] = " ".join(str(script.get("comment_question", "")).split())
+    script["location"] = " ".join(str(script.get("location", "")).split())
+    return script
+
+
+def validate_script(script):
+    """Returns a list of problems (empty = good)."""
+    problems = []
+    scenes = script.get("scenes")
+    if not isinstance(scenes, list) or len(scenes) != config.NUM_SCENES:
+        return [f"need exactly {config.NUM_SCENES} scenes, got {len(scenes) if isinstance(scenes, list) else 'none'}"]
+    if not _DEV.search(script.get("title", "")):
+        problems.append("title must be Marathi (Devanagari)")
+    total = 0
+    for i, sc in enumerate(scenes, 1):
+        t = sc.get("text", "")
+        words = len(t.split())
+        total += words
+        letters_dev, letters_lat = len(_DEV.findall(t)), len(_LAT.findall(t))
+        if words < 3:
+            problems.append(f"scene {i}: text too short")
+        if words > 24:
+            problems.append(f"scene {i}: text too long ({words} words)")
+        if letters_dev < 5 or letters_lat > 0.05 * max(letters_dev, 1):
+            problems.append(f"scene {i}: must be Marathi Devanagari only")
+        if _BAD.search(t):
+            problems.append(f"scene {i}: mentions AI/prompt/script")
+        if i < len(scenes) and len(sc.get("image_prompt", "")) < 15:
+            problems.append(f"scene {i}: image_prompt missing")
+    if not 70 <= total <= 150:
+        problems.append(f"total spoken words {total} (need 90-130)")
+    return problems
+
+
+# ============================================================ public API
+def generate_script(episode, previous, following):
+    """Write + polish the script for one episode. Retries until it passes validation."""
+    prev_title = previous.get("title") if previous else ""
+    next_title = following.get("title") if following else ""
+    notes, best, best_problems = "", None, None
+    for attempt in range(1, 4):
+        print(f"\nWriting script (attempt {attempt}/3) ...")
+        try:
+            script = _ask_json(_script_prompt(episode, prev_title, next_title, notes), 0.9)
+            if not isinstance(script, dict) or "scenes" not in script:
+                raise RuntimeError("Gemini JSON has no scenes")
+            script = normalize_script(script)
+            problems = validate_script(script)
+            if not problems:
+                try:
+                    print("Director pass (hook, facts, Marathi, picture match) ...")
+                    fixed = normalize_script(_ask_json(_director_prompt(episode, script), 0.6))
+                    if not validate_script(fixed):
+                        script = fixed
+                    else:
+                        print("   director output failed validation -> keeping first draft")
+                except Exception as e:  # noqa: BLE001
+                    print("   director pass skipped:", str(e)[:150])
+                script["teaser"] = next_title
+                return script
+            print("   problems:", "; ".join(problems))
+            if best is None or len(problems) < len(best_problems):
+                best, best_problems = script, problems
+            notes = "\nFIX THESE PROBLEMS FROM YOUR LAST ATTEMPT: " + "; ".join(problems) + "\n"
+        except Exception as e:  # noqa: BLE001
+            print("   attempt failed:", str(e)[:200])
+    # accept a near-miss only if the structure is sound (right scene count, Marathi title)
+    if best is not None and not any(("exactly" in p or "title" in p or "Devanagari" in p or "AI/prompt" in p)
+                                    for p in best_problems):
+        print("Using best near-miss script. Remaining issues:", best_problems)
+        best["teaser"] = next_title
+        return best
+    raise RuntimeError("Could not produce a valid script after 3 attempts.")
+
+
+def _generate_new_episode(number, episodes):
+    """Called only if the JSON runs out (after the coronation): continue with the next chronological event."""
+    context = "\n".join(f"Episode {e['episode']}: {e['title']} - {e['story']}" for e in episodes[-5:])
+    prompt = f"""You are an expert on the Valmiki Ramayana. We are making a chronological daily series.
+Previous episodes:
+{context}
+
+Give Episode {number}: the NEXT event in the Ramayana (continue into the Uttara Kanda if the main story has ended). It must be a real event from the epic, not an invented one.
+Return ONLY JSON: {{"title": "English title", "story": "English summary, 2-3 sentences"}}"""
+    data = _ask_json(prompt, 0.4)
+    ep = {"episode": number, "title": str(data["title"]).strip(), "story": str(data["story"]).strip()}
+    episodes.append(ep)
+    save_episodes(episodes)
+    print(f"New episode {number} added to {config.EPISODES_FILE}: {ep['title']}")
+    return ep
+
 
 def get_next_episode():
+    """Returns (episode, previous, following, number). Does NOT change the saved state."""
     episodes = load_episodes()
-    if not episodes:
-        raise RuntimeError("No episodes found.")
-
-    next_number = load_state()
-
-    print("\n" + "=" * 60)
-    print(f"SELECTING NEXT RAMAYANA EPISODE: {next_number}")
-    print("=" * 60)
-
-    episode = find_episode(episodes, next_number)
-
-    # Automatically generate episode if missing from JSON
+    if config.EPISODE_OVERRIDE:
+        number = int(config.EPISODE_OVERRIDE)
+        print(f"EPISODE_OVERRIDE -> episode {number} (state will not change)")
+    else:
+        number = load_state()
+        if number > config.MAX_EPISODES:
+            print(f"Series finished ({config.MAX_EPISODES} episodes) -> starting again from episode 1")
+            number = 1
+    episode = find_episode(episodes, number)
     if episode is None:
-        print(f"Episode {next_number} not found in {EPISODES_FILE}. Generating automatically...")
-        episode = generate_new_episode_data(next_number, episodes)
-
-    selected_number = get_episode_number(episode)
-
-    # Save state for the NEXT run
-    save_state(selected_number + 1)
-
-    return generate_story(episode)
-
-
-# ============================================================
-# MAIN EXECUTION
-# ============================================================
-
-if __name__ == "__main__":
-    result = get_next_episode()
-
-    print("\n" + "=" * 60)
-    print("FINAL MARATHI STORY")
-    print("=" * 60)
-    print(json.dumps(result, indent=2, ensure_ascii=False))
-    print("=" * 60)
+        if config.EPISODE_OVERRIDE:
+            raise RuntimeError(f"Episode {number} does not exist.")
+        print(f"Episode {number} not in {config.EPISODES_FILE} -> asking Gemini for the next event")
+        episode = _generate_new_episode(number, episodes)
+    return episode, find_episode(episodes, number - 1), find_episode(episodes, number + 1), number
