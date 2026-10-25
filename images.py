@@ -18,9 +18,9 @@ class CloudflareAuthError(RuntimeError):
 
 
 # ------------------------------------------------------------------ prompt building
-def build_prompt(scene, attire, location, safe=False):
+def build_prompt(scene, attire, location, safe=False, age="adult"):
     """action first (FLUX reads the start of the prompt most closely), then the fixed look of each character."""
-    looks = "; ".join(cast.describe(k, attire) for k in scene.get("characters", []))
+    looks = "; ".join(cast.describe(k, attire, age) for k in scene.get("characters", []))
     parts = [] if safe else [scene.get("image_prompt", "").rstrip(". ")]
     parts += [looks, f"Setting: {location}" if location else "", cast.ART_STYLE]
     prompt = ". ".join(p for p in parts if p)
@@ -96,13 +96,13 @@ def _request(prompt, seed):
     return img
 
 
-def make_image(scene, attire, location, path, seed):
+def make_image(scene, attire, location, path, seed, age="adult"):
     """Returns True if a fresh picture was saved. Tries the full prompt twice, then a 'safe' prompt without the action
     (in case Cloudflare's content filter rejected it), each with a new seed."""
     plan = [(False, 0), (False, 1), (True, 2), (True, 3)]
     last = "unknown"
     for n, (safe, bump) in enumerate(plan, 1):
-        prompt = build_prompt(scene, attire, location, safe=safe)
+        prompt = build_prompt(scene, attire, location, safe=safe, age=age)
         try:
             compose(_request(prompt, seed + bump * 7919)).save(path, "JPEG", quality=93)
             return True

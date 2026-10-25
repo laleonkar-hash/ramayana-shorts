@@ -130,7 +130,7 @@ Previous episode: {prev_title or 'none (this is the start of the series)'}
 Write ONE script of EXACTLY {n} scenes (about 45 seconds when spoken).
 
 STRUCTURE
-- Scene 1 = HOOK, 6-12 words. {hook}. Never start with a greeting, a title or "आजच्या भागात".
+- Scene 1 = HOOK, 6-12 words, speaker "narrator" or a lively character (never a king or sage). {hook}. Never start with a greeting, a title or "आजच्या भागात".
 - Scenes 2 to {n-1}: the story as a chain of vivid moments. Each scene = one new picture and ONE idea. Escalate emotion and curiosity; hold a surprise for the second half.
 - At least 3 scenes must be DIRECT SPEECH in a character's own words (first person, short and powerful, e.g. Rama, Sita, Hanuman, Ravana speaking). The rest are the narrator.
 - Scene {n} = CLOSING CARD, 14-20 words: {ending}. It must mention the next episode. Its speaker is "narrator". Do not describe any picture for it.
@@ -142,7 +142,7 @@ LANGUAGE RULES for the spoken "text"
 - Each normal scene: 8-16 words. Total for all scenes: 90-130 words.
 
 CONTENT RULES
-- Stay faithful to the Ramayana and the FACTS above. Do not invent new events. Do not insult any person, community or religion. Tone: reverent, emotional, heroic.
+- ACCURACY IS CRITICAL. Use the FACTS above. Add a detail from your own memory ONLY if you are 100% sure it is in the Valmiki Ramayana; otherwise leave it out. Never invent who appears, who says what, numbers, places or names. Never make a god appear personally unless the FACTS say so. Do not insult any person, community or religion. Tone: reverent, emotional, heroic.
 - Never mention AI, Gemini, prompts, scripts or "episode summary".
 
 PICTURES: for every scene except the last, give "image_prompt" in ENGLISH: ONE clear visual moment (action, emotion, camera angle such as close-up or wide shot, lighting). Do NOT describe faces or clothes of known characters, the computer adds that. No blood, gore, nudity or cruelty: show battles with glowing arrows, dust, fire and light. No text in the picture. Keep "location" the same visual world through the episode.
@@ -176,7 +176,7 @@ SCRIPT:
 
 Do all of this:
 1. Scene 1 must be an irresistible hook within 2 seconds of speech. If it is weak, rewrite it.
-2. Fix any factual mistake against the FACTS and the Ramayana; fix contradictions; make every scene follow from the previous one.
+2. Fix any factual mistake against the FACTS and the Valmiki Ramayana (remove any detail you are not sure about; no god may appear personally unless the FACTS say so); fix contradictions; make every scene follow from the previous one.
 3. Make the Marathi natural, spoken, emotional and grammatically perfect. Keep speech lines short and punchy. Only Marathi Devanagari, no digits, no English, no emoji, only , . ? ! punctuation.
 4. Each "image_prompt" (ENGLISH) must show EXACTLY what that line says at that moment, with the right "characters" visible. Keep it non-violent (no blood or gore). Do not describe faces or clothes of known characters.
 5. Keep "speaker", "characters", "motion", "sfx" valid and unchanged unless a fix needs it. Title: 30-55 characters, hook first, one emoji at the end.
@@ -219,6 +219,10 @@ def normalize_script(script):
         sc["image_prompt"] = " ".join(str(sc.get("image_prompt") or "").split())
         sc["motion"] = sc.get("motion") if sc.get("motion") in MOTIONS else ["zoom_in", "pan_right", "zoom_out", "pan_left"][i % 4]
         sc["sfx"] = sc.get("sfx") if sc.get("sfx") in SFX else "none"
+    first = script["scenes"][0]
+    if cast.voice_profile(first["speaker"])[0] in ("elder", "villain"):
+        first["speaker"] = "narrator"                      # slow/growly voices make a weak opening
+    first["sfx"] = "none"                                  # clean start: voice only, no effect over the first word
     last = script["scenes"][-1]
     last["speaker"], last["characters"], last["motion"] = "narrator", [], "zoom_in"
     script["tags"] = [str(t).strip().lstrip("#") for t in (script.get("tags") or []) if str(t).strip()][:15]

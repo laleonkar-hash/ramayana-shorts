@@ -83,12 +83,12 @@ ALIASES = {
 
 # voice profile -> (edge-tts voice, rate, pitch, caption colour as RGB hex)
 VOICES = {
-    "narrator": ("mr-IN-ManoharNeural", "+4%",  "-3Hz",  "FFFFFF"),   # warm deep storyteller
+    "narrator": ("mr-IN-ManoharNeural", "+3%",  "-2Hz",  "FFFFFF"),   # warm deep storyteller
     "hero":     ("mr-IN-ManoharNeural", "+0%",  "+3Hz",  "FFD54F"),   # calm, noble (Rama, Bharata)
-    "fiery":    ("mr-IN-ManoharNeural", "+10%", "+9Hz",  "FFB300"),   # Lakshmana: quick, angry
-    "vanara":   ("mr-IN-ManoharNeural", "+10%", "+15Hz", "FF9F43"),   # Hanuman, Sugriva, Angad: energetic
-    "elder":    ("mr-IN-ManoharNeural", "-6%",  "-14Hz", "A5D6A7"),   # kings, sages: slow and deep
-    "villain":  ("mr-IN-ManoharNeural", "-4%",  "-26Hz", "FF6B6B"),   # Ravana: growl
+    "fiery":    ("mr-IN-ManoharNeural", "+8%",  "+6Hz",  "FFB300"),   # Lakshmana: quick, angry
+    "vanara":   ("mr-IN-ManoharNeural", "+8%",  "+9Hz",  "FF9F43"),   # Hanuman, Sugriva, Angad: energetic
+    "elder":    ("mr-IN-ManoharNeural", "-3%",  "-8Hz",  "A5D6A7"),   # kings, sages: slow and deep
+    "villain":  ("mr-IN-ManoharNeural", "-3%",  "-16Hz", "FF6B6B"),   # Ravana: growl
     "woman":    ("mr-IN-AarohiNeural",  "-2%",  "+0Hz",  "FF9DBD"),   # Sita
     "queen":    ("mr-IN-AarohiNeural",  "+2%",  "-6Hz",  "F8A5FF"),   # queens, demonesses
 }
@@ -111,7 +111,25 @@ def voice_profile(speaker):
     return profile, VOICES[profile]
 
 
-def describe(key, attire):
+AGE_LOOKS = {
+    "infant": {
+        "rama": "newborn baby Rama, an adorable glowing blue-skinned baby with big lotus eyes, wrapped in golden cloth, tiny gold ornaments",
+        "lakshmana": "newborn baby Lakshmana, an adorable fair-skinned baby wrapped in white and gold cloth, tiny gold ornaments",
+        "bharata": "newborn baby Bharata, an adorable fair-skinned baby wrapped in saffron and gold cloth, tiny gold ornaments",
+        "shatrughna": "newborn baby Shatrughna, an adorable fair-skinned baby wrapped in white and gold cloth, tiny gold ornaments",
+    },
+    "teen": {
+        "rama": "teenage Rama about sixteen years old, handsome slim youth with glowing blue skin, lotus eyes, calm face, hair in a topknot, saffron cloth, holding a bow",
+        "lakshmana": "teenage Lakshmana about fifteen years old, fair-skinned energetic youth with sharp eyes, hair in a topknot, saffron cloth, holding a bow",
+        "bharata": "teenage Bharata, fair-skinned youth, saffron cloth, gentle face",
+        "shatrughna": "teenage Shatrughna, fair-skinned youth, saffron cloth, loyal face",
+    },
+}
+
+
+def describe(key, attire, age="adult"):
+    if age in AGE_LOOKS and key in AGE_LOOKS[age]:
+        return AGE_LOOKS[age][key]
     looks = CHARACTERS[key][0]
     if isinstance(looks, dict):
         return f"{looks['base']}, wearing {looks.get(attire, looks['palace'])}"

@@ -23,8 +23,8 @@ def duration(path):
 
 def _trim(src, dst):
     """Remove leading/trailing silence (edge-tts adds ~0.3 s of air at both ends)."""
-    af = ("silenceremove=start_periods=1:start_threshold=-48dB:start_silence=0.04,areverse,"
-          "silenceremove=start_periods=1:start_threshold=-48dB:start_silence=0.12,areverse")
+    af = ("silenceremove=start_periods=1:start_threshold=-55dB:start_silence=0.09,areverse,"
+          "silenceremove=start_periods=1:start_threshold=-55dB:start_silence=0.15,areverse")
     p = subprocess.run(["ffmpeg", "-y", "-i", src, "-af", af, "-ar", "44100", "-ac", "2", dst],
                        capture_output=True, text=True)
     if p.returncode != 0 or not os.path.exists(dst) or os.path.getsize(dst) < 1000:

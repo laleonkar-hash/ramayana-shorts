@@ -69,7 +69,8 @@ def main():
         img_path = os.path.join(outdir, img)
         if i == last_index:
             images.save_portrait(img_path)                       # closing card = your Rama portrait
-        elif not images.make_image(sc, script["attire"], script["location"], img_path, base_seed + i * 101):
+        elif not images.make_image(sc, script["attire"], script["location"], img_path, base_seed + i * 101,
+                                                    episode.get("age", "adult")):
             failed += 1
             if failed > 3:
                 raise RuntimeError("More than 3 pictures failed (Cloudflare quota or outage). Nothing uploaded.")
