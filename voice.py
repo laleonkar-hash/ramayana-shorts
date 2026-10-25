@@ -21,10 +21,13 @@ def duration(path):
     return float(out.strip())
 
 
-def _trim(src, dst):
+def _trim(src, dst, semitones=0.0):
     """Remove leading/trailing silence (edge-tts adds ~0.3 s of air at both ends)."""
     af = ("silenceremove=start_periods=1:start_threshold=-55dB:start_silence=0.09,areverse,"
           "silenceremove=start_periods=1:start_threshold=-55dB:start_silence=0.15,areverse")
+    if abs(semitones) > 0.01:
+        f = 2 ** (semitones / 12.0)           # >1 = higher/younger/smaller voice, <1 = lower/older/bigger voice
+        af += f",asetrate={44100 * f:.1f},aresample=44100,atempo={1 / f:.6f}"
     p = subprocess.run(["ffmpeg", "-y", "-i", src, "-af", af, "-ar", "44100", "-ac", "2", dst],
                        capture_output=True, text=True)
     if p.returncode != 0 or not os.path.exists(dst) or os.path.getsize(dst) < 1000:
@@ -33,7 +36,7 @@ def _trim(src, dst):
 
 def synth(text, out_wav, speaker, retries=4):
     """Returns (duration_seconds, voice_profile_name)."""
-    profile, (voice, rate, pitch, _color) = cast.voice_profile(speaker)
+    profile, (voice, rate, pitch, _color, semitones) = cast.voice_profile(speaker)
     raw = out_wav.replace(".wav", ".raw.mp3")
     last = None
     for attempt in range(1, retries + 1):
@@ -43,7 +46,7 @@ def synth(text, out_wav, speaker, retries=4):
             _tts(text, raw, voice, r, p)
             if not os.path.exists(raw) or os.path.getsize(raw) < 1000:
                 raise RuntimeError("voice file is empty")
-            _trim(raw, out_wav)
+            _trim(raw, out_wav, semitones)
             d = duration(out_wav)
             if d < 0.6:
                 raise RuntimeError(f"voice too short ({d:.2f}s)")

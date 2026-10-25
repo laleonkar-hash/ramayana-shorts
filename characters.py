@@ -81,16 +81,18 @@ ALIASES = {
     "narrator": "narrator",
 }
 
-# voice profile -> (edge-tts voice, rate, pitch, caption colour as RGB hex)
+# voice profile -> (edge-tts voice, rate, edge pitch, caption colour, semitone shift applied afterwards in FFmpeg)
+# Marathi has only TWO neural voices (Manohar = man, Aarohi = woman), and the service's own pitch setting is weak,
+# so every character is pushed to a clearly different pitch/size by shifting the recorded audio ourselves.
 VOICES = {
-    "narrator": ("mr-IN-ManoharNeural", "+3%",  "-2Hz",  "FFFFFF"),   # warm deep storyteller
-    "hero":     ("mr-IN-ManoharNeural", "+0%",  "+3Hz",  "FFD54F"),   # calm, noble (Rama, Bharata)
-    "fiery":    ("mr-IN-ManoharNeural", "+8%",  "+6Hz",  "FFB300"),   # Lakshmana: quick, angry
-    "vanara":   ("mr-IN-ManoharNeural", "+8%",  "+9Hz",  "FF9F43"),   # Hanuman, Sugriva, Angad: energetic
-    "elder":    ("mr-IN-ManoharNeural", "-3%",  "-8Hz",  "A5D6A7"),   # kings, sages: slow and deep
-    "villain":  ("mr-IN-ManoharNeural", "-3%",  "-16Hz", "FF6B6B"),   # Ravana: growl
-    "woman":    ("mr-IN-AarohiNeural",  "-2%",  "+0Hz",  "FF9DBD"),   # Sita
-    "queen":    ("mr-IN-AarohiNeural",  "+2%",  "-6Hz",  "F8A5FF"),   # queens, demonesses
+    "narrator": ("mr-IN-ManoharNeural", "+3%", "+0Hz", "FFFFFF",  0.0),   # reference storyteller
+    "hero":     ("mr-IN-ManoharNeural", "+0%", "+0Hz", "FFD54F", +2.0),   # Rama, Bharata, Guha: younger, brighter
+    "fiery":    ("mr-IN-ManoharNeural", "+8%", "+0Hz", "FFB300", +3.5),   # Lakshmana: quick, sharp
+    "vanara":   ("mr-IN-ManoharNeural", "+8%", "+0Hz", "FF9F43", +4.5),   # Hanuman, Sugriva, Angad: lively
+    "elder":    ("mr-IN-ManoharNeural", "-4%", "+0Hz", "A5D6A7", -3.5),   # kings, sages, Jatayu: old and deep
+    "villain":  ("mr-IN-ManoharNeural", "-4%", "+0Hz", "FF6B6B", -5.5),   # Ravana, demons: huge and growling
+    "woman":    ("mr-IN-AarohiNeural",  "-2%", "+0Hz", "FF9DBD", +1.0),   # Sita, Tara: soft, young
+    "queen":    ("mr-IN-AarohiNeural",  "+0%", "+0Hz", "F8A5FF", -2.5),   # Kaikeyi, Kaushalya: mature, firm
 }
 
 CAST_KEYS = sorted(CHARACTERS)

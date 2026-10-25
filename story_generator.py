@@ -132,7 +132,7 @@ Write ONE script of EXACTLY {n} scenes (about 45 seconds when spoken).
 STRUCTURE
 - Scene 1 = HOOK, 6-12 words, speaker "narrator" or a lively character (never a king or sage). {hook}. Never start with a greeting, a title or "आजच्या भागात".
 - Scenes 2 to {n-1}: the story as a chain of vivid moments. Each scene = one new picture and ONE idea. Escalate emotion and curiosity; hold a surprise for the second half.
-- At least 3 scenes must be DIRECT SPEECH in a character's own words (first person, short and powerful, e.g. Rama, Sita, Hanuman, Ravana speaking). The rest are the narrator.
+- At least 4 scenes must be DIRECT SPEECH in a character's own words (first person, short and powerful), spoken by at least 2 DIFFERENT characters, and by a woman wherever the story has one (Sita, Kaikeyi, Kaushalya, Mandodari ...). Every line must really be said by the character in the "speaker" field, so the right man or woman voice is used. The rest are the narrator.
 - Scene {n} = CLOSING CARD, 14-20 words: {ending}. It must mention the next episode. Its speaker is "narrator". Do not describe any picture for it.
 
 LANGUAGE RULES for the spoken "text"

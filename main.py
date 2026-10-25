@@ -98,6 +98,9 @@ def main():
     print("\n4/5 Uploading to YouTube")
     vid = youtube_uploader.upload_video(final, script, number, os.path.join(outdir, "scene00.jpg"))
 
+    if config.FIRST_COMMENT:
+        youtube_uploader.post_first_comment(vid, script)
+
     print("\n5/5 Saving progress")
     if config.EPISODE_OVERRIDE:
         print("EPISODE_OVERRIDE used: saved state left unchanged.")

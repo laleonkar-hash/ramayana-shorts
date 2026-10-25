@@ -11,13 +11,14 @@ import config
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 
 
-def _service():
+def _service(scopes=None):
     for name in ("YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET", "YOUTUBE_REFRESH_TOKEN"):
         if not getattr(config, name):
             raise RuntimeError(f"{name} is missing.")
     creds = Credentials(None, refresh_token=config.YOUTUBE_REFRESH_TOKEN,
                         token_uri="https://oauth2.googleapis.com/token",
-                        client_id=config.YOUTUBE_CLIENT_ID, client_secret=config.YOUTUBE_CLIENT_SECRET, scopes=SCOPES)
+                        client_id=config.YOUTUBE_CLIENT_ID, client_secret=config.YOUTUBE_CLIENT_SECRET,
+                        scopes=scopes or SCOPES)
     return build("youtube", "v3", credentials=creds)
 
 
@@ -79,3 +80,20 @@ def upload_video(video_path, script, episode_number, thumb_path=None):
         except Exception as e:  # noqa: BLE001
             print("Thumbnail not set (not required for Shorts):", str(e)[:120])
     return vid
+
+
+def post_first_comment(video_id, script):
+    """The channel's own first comment (the episode question) to start a real conversation.
+    Needs the extra 'youtube.force-ssl' permission; if your token does not have it this just prints a note and
+    the upload is NOT affected."""
+    q = (script.get("comment_question") or "").strip()
+    if not q:
+        return
+    text = f"{q} 👇\nजय श्री राम 🙏"
+    try:
+        yt = _service(["https://www.googleapis.com/auth/youtube.force-ssl"])
+        yt.commentThreads().insert(part="snippet", body={"snippet": {"videoId": video_id, "topLevelComment": {
+            "snippet": {"textOriginal": text}}}}).execute()
+        print("First comment posted.")
+    except Exception as e:  # noqa: BLE001
+        print("First comment skipped (token lacks comment permission - see README, optional):", str(e)[:140])

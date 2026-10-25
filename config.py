@@ -44,5 +44,6 @@ MADE_FOR_KIDS = env("MADE_FOR_KIDS", "false").lower() == "true"
 CATEGORY_ID = "24"                                     # Entertainment
 CHANNEL_HASHTAGS = "#रामायण #Ramayana #JaiShreeRam #श्रीराम #मराठी #Shorts"
 
+FIRST_COMMENT = env("FIRST_COMMENT", "true").lower() == "true"   # channel posts the episode question as the first comment
 DRY_RUN = env("DRY_RUN", "false").lower() == "true"    # build the video, do NOT upload, do NOT advance the episode
 EPISODE_OVERRIDE = env("EPISODE_OVERRIDE")             # build one specific episode (never changes the saved state)
