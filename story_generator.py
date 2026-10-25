@@ -83,34 +83,108 @@ def _client():
     return genai.Client(api_key=config.GEMINI_API_KEY)
 
 
+_DEAD = set()          # models that are out of quota / retired during THIS run: never asked again
+_STATE = {"fallback": False}
+
+
+class GeminiUnavailable(RuntimeError):
+    """Every writer (all Gemini models + the Cloudflare fallback) failed. Retrying the whole script would only waste quota."""
+
+
+def _retry_seconds(msg, default=30):
+    m = re.search(r"retry in ([\d.]+)\s*s", msg, re.I) or re.search(r"retryDelay\W+(\d+)", msg)
+    return min(float(m.group(1)) + 2, 60) if m else default
+
+
+def _extract_json(text):
+    text = re.sub(r"^```(?:json)?|```$", "", (text or "").strip(), flags=re.M).strip()
+    try:
+        return json.loads(text)
+    except Exception:  # noqa: BLE001
+        m = re.search(r"\{.*\}", text, re.S)           # model wrapped the JSON in chatter
+        if not m:
+            raise
+        return json.loads(m.group(0))
+
+
+def _ask_cloudflare(prompt, temperature):
+    """Fallback writer: Cloudflare Workers AI text model (same token as the pictures)."""
+    import requests
+    if not (config.CF_ACCOUNT_ID and config.CF_API_TOKEN):
+        raise RuntimeError("no Cloudflare credentials")
+    print(f"   Fallback writer: Cloudflare {config.CF_TEXT_MODEL}")
+    r = requests.post(
+        f"https://api.cloudflare.com/client/v4/accounts/{config.CF_ACCOUNT_ID}/ai/run/{config.CF_TEXT_MODEL}",
+        headers={"Authorization": f"Bearer {config.CF_API_TOKEN}"},
+        json={"messages": [{"role": "system", "content": "You are a careful writer. Reply with ONE valid JSON object only, no other text."},
+                           {"role": "user", "content": prompt}],
+              "max_tokens": 4096, "temperature": min(temperature, 0.8)}, timeout=240)
+    if r.status_code != 200:
+        raise RuntimeError(f"Cloudflare text HTTP {r.status_code}: {r.text[:200]}")
+    res = r.json().get("result") or {}
+    text = res.get("response")
+    if not text and res.get("choices"):
+        text = res["choices"][0].get("message", {}).get("content")
+    if not text:
+        raise RuntimeError(f"Cloudflare text: empty result {str(res)[:150]}")
+    return _extract_json(text)
+
+
 def _ask_json(prompt, temperature=0.9):
-    """Call Gemini (model fallback + retries on temporary errors) and return parsed JSON."""
+    """Gemini with sensible quota handling:
+       - daily quota used up (429 PerDay)      -> skip that model at once (no pointless retries)
+       - per-minute limit (429)                -> wait the time Google asks, retry once
+       - 503/500 overload                      -> short back-off, up to 3 tries
+       - 404 / retired model                   -> next model
+       then Cloudflare text model, then GeminiUnavailable."""
     from google.genai import types
     client = _client()
     last = None
     for model in config.GEMINI_MODELS:
-        for attempt in range(1, 4):
+        if model in _DEAD:
+            continue
+        tries = 0
+        while tries < 3:
+            tries += 1
             try:
-                print(f"   Gemini {model} (try {attempt}/3)")
+                print(f"   Gemini {model} (try {tries}/3)")
                 resp = client.models.generate_content(
                     model=model, contents=prompt,
                     config=types.GenerateContentConfig(response_mime_type="application/json", temperature=temperature))
                 text = (getattr(resp, "text", None) or "").strip()
                 if not text:
-                    raise RuntimeError("empty response")
-                text = re.sub(r"^```(?:json)?|```$", "", text, flags=re.M).strip()
-                return json.loads(text)
+                    raise ValueError("empty response")
+                return _extract_json(text)
             except Exception as e:  # noqa: BLE001
-                last = e
-                msg = str(e)
-                print(f"   -> failed: {msg[:200]}")
-                temporary = any(k in msg for k in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "500", "502", "504",
-                                                  "Expecting", "JSON", "empty response", "timed out", "Timeout"))
-                if temporary:
-                    time.sleep(6 * attempt)
-                    continue
-                break  # e.g. unknown model -> try the next model
-    raise RuntimeError(f"All Gemini models failed. Last error: {last}")
+                last, msg = e, str(e)
+                print(f"   -> {type(e).__name__}: {msg[:260]}")
+                low = msg.lower()
+                if "429" in msg or "resource_exhausted" in low:
+                    if "perday" in low.replace(" ", "").replace("_", "") or "per day" in low or "daily" in low:
+                        print("   -> daily quota of this model is used up, trying the next model")
+                        _DEAD.add(model)
+                        break
+                    if tries >= 2:
+                        break
+                    wait = _retry_seconds(msg)
+                    print(f"   -> per-minute limit, waiting {wait:.0f}s")
+                    time.sleep(wait)
+                elif any(k in msg for k in ("503", "500", "502", "504", "UNAVAILABLE", "INTERNAL", "DEADLINE")) or "timed out" in low:
+                    time.sleep(5 * 2 ** (tries - 1))
+                elif isinstance(e, (ValueError, json.JSONDecodeError)):
+                    time.sleep(2)                        # bad/empty JSON: one more go, same model
+                else:
+                    _DEAD.add(model)
+                    break                                # 404 retired model, 400, 403 ... -> next model
+    print("   All Gemini models unavailable -> trying the Cloudflare text model")
+    try:
+        out = _ask_cloudflare(prompt, temperature)
+        _STATE["fallback"] = True
+        return out
+    except Exception as e:  # noqa: BLE001
+        raise GeminiUnavailable(
+            "No writer is available right now. Gemini: quota used up or overloaded (daily quota resets at about 12:30 PM IST); "
+            f"Cloudflare fallback: {str(e)[:160]}. Last Gemini error: {str(last)[:200]}") from e
 
 
 # ============================================================ prompts
@@ -278,6 +352,10 @@ def generate_script(episode, previous, following):
             problems = validate_script(script)
             if not problems:
                 try:
+                    if not config.DIRECTOR_PASS:
+                        raise RuntimeError("DIRECTOR_PASS=false")
+                    if _STATE["fallback"]:
+                        raise RuntimeError("fallback writer was used; not spending more requests")
                     print("Director pass (hook, facts, Marathi, picture match) ...")
                     fixed = normalize_script(_ask_json(_director_prompt(episode, script), 0.6))
                     if not validate_script(fixed):
@@ -285,13 +363,15 @@ def generate_script(episode, previous, following):
                     else:
                         print("   director output failed validation -> keeping first draft")
                 except Exception as e:  # noqa: BLE001
-                    print("   director pass skipped:", str(e)[:150])
+                    print("   director pass skipped:", str(e)[:150])   # the first draft is already valid
                 script["teaser"] = next_title
                 return script
             print("   problems:", "; ".join(problems))
             if best is None or len(problems) < len(best_problems):
                 best, best_problems = script, problems
             notes = "\nFIX THESE PROBLEMS FROM YOUR LAST ATTEMPT: " + "; ".join(problems) + "\n"
+        except GeminiUnavailable:
+            raise                                          # quota/outage: retrying only burns more requests
         except Exception as e:  # noqa: BLE001
             print("   attempt failed:", str(e)[:200])
     # accept a near-miss only if the structure is sound (right scene count, Marathi title)
