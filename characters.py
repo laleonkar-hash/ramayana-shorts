@@ -81,18 +81,18 @@ ALIASES = {
     "narrator": "narrator",
 }
 
-# voice profile -> (edge-tts voice, rate, edge pitch, caption colour, semitone shift applied afterwards in FFmpeg)
-# Marathi has only TWO neural voices (Manohar = man, Aarohi = woman), and the service's own pitch setting is weak,
-# so every character is pushed to a clearly different pitch/size by shifting the recorded audio ourselves.
+# voice profile -> (edge-tts voice, rate, edge pitch, caption colour, tiny semitone shift in FFmpeg)
+# Natural and dignified, NOT cartoonish: men use Manohar, women use Aarohi (that is the main difference you hear).
+# Characters differ only by pace and by at most +/-1.5 semitone, because bigger pitch shifts sound like chipmunks/monsters.
 VOICES = {
-    "narrator": ("mr-IN-ManoharNeural", "+3%", "+0Hz", "FFFFFF",  0.0),   # reference storyteller
-    "hero":     ("mr-IN-ManoharNeural", "+0%", "+0Hz", "FFD54F", +2.0),   # Rama, Bharata, Guha: younger, brighter
-    "fiery":    ("mr-IN-ManoharNeural", "+8%", "+0Hz", "FFB300", +3.5),   # Lakshmana: quick, sharp
-    "vanara":   ("mr-IN-ManoharNeural", "+8%", "+0Hz", "FF9F43", +4.5),   # Hanuman, Sugriva, Angad: lively
-    "elder":    ("mr-IN-ManoharNeural", "-4%", "+0Hz", "A5D6A7", -3.5),   # kings, sages, Jatayu: old and deep
-    "villain":  ("mr-IN-ManoharNeural", "-4%", "+0Hz", "FF6B6B", -5.5),   # Ravana, demons: huge and growling
-    "woman":    ("mr-IN-AarohiNeural",  "-2%", "+0Hz", "FF9DBD", +1.0),   # Sita, Tara: soft, young
-    "queen":    ("mr-IN-AarohiNeural",  "+0%", "+0Hz", "F8A5FF", -2.5),   # Kaikeyi, Kaushalya: mature, firm
+    "narrator": ("mr-IN-ManoharNeural", "+0%", "+0Hz", "FFFFFF",  0.0),   # calm epic storyteller
+    "hero":     ("mr-IN-ManoharNeural", "-3%", "+0Hz", "FFD54F", +0.5),   # Rama, Bharata: gentle, measured
+    "fiery":    ("mr-IN-ManoharNeural", "+5%", "+0Hz", "FFB300", +0.8),   # Lakshmana: firm, a little faster
+    "vanara":   ("mr-IN-ManoharNeural", "+4%", "+0Hz", "FF9F43", +0.8),   # Hanuman, Sugriva: devoted, energetic
+    "elder":    ("mr-IN-ManoharNeural", "-6%", "+0Hz", "A5D6A7", -1.0),   # kings, sages: slow and wise
+    "villain":  ("mr-IN-ManoharNeural", "-5%", "+0Hz", "FF6B6B", -1.5),   # Ravana: slow, heavy, menacing
+    "woman":    ("mr-IN-AarohiNeural",  "-3%", "+0Hz", "FF9DBD",  0.0),   # Sita: soft, graceful
+    "queen":    ("mr-IN-AarohiNeural",  "-2%", "+0Hz", "F8A5FF", -0.8),   # Kaikeyi, Kaushalya: mature, firm
 }
 
 CAST_KEYS = sorted(CHARACTERS)
