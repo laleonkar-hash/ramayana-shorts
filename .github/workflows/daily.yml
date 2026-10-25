@@ -2,74 +2,85 @@ name: Daily Ramayana Short
 
 on:
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Test only: build the video, do NOT upload, do NOT advance the episode"
+        type: boolean
+        default: false
+      episode:
+        description: "Optional: build this specific episode number (state is not changed)"
+        type: string
+        default: ""
   schedule:
-    # 03:30 UTC corresponds to 09:00 AM IST
-    - cron: "30 3 * * *"
+    - cron: "0 1 * * *"     # 06:30 AM IST
+    - cron: "30 13 * * *"   # 07:00 PM IST   (delete one line if you want only 1 Short per day)
 
 permissions:
   contents: write
 
+concurrency:
+  group: ramayana-shorts
+  cancel-in-progress: false
+
 jobs:
   create-and-upload:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 40
     steps:
-      # =====================================================
-      # CHECKOUT
-      # =====================================================
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # =====================================================
-      # PYTHON
-      # =====================================================
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
 
-      # =====================================================
-      # FFMPEG
-      # =====================================================
-      - name: Install FFmpeg
+      - name: Install FFmpeg + Marathi font
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get -o Acquire::Retries=3 update
+          sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends ffmpeg fonts-noto-core fontconfig
+          fc-cache -f
+          fc-list :lang=mr | head -3
 
-      # =====================================================
-      # PYTHON PACKAGES
-      # =====================================================
-      - name: Install dependencies
+      - name: Install Python packages
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # =====================================================
-      # RUN COMPLETE PIPELINE
-      # =====================================================
       - name: Create and upload Ramayana Short
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
-        run: |
-          python main.py
+          DRY_RUN: ${{ inputs.dry_run }}
+          EPISODE_OVERRIDE: ${{ inputs.episode }}
+          UPLOAD_PRIVACY: ${{ vars.UPLOAD_PRIVACY }}
+          GEMINI_MODELS: ${{ vars.GEMINI_MODELS }}
+        run: python main.py
 
-      # =====================================================
-      # SAVE EPISODE STATE & GENERATED EPISODES
-      # =====================================================
-      - name: Save next episode
+      - name: Keep a copy of the video for review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-${{ github.run_id }}
+          path: |
+            out/*/final_short.mp4
+            out/*/script.json
+          retention-days: 5
+          if-no-files-found: ignore
+
+      - name: Save episode progress
+        if: success() && inputs.dry_run != true && inputs.episode == ''
         run: |
-          echo "Saving episode state..."
-          cat episode_state.json
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add episode_state.json ramayana_episodes.json
+          git add episode_state.json upload_log.json ramayana_episodes.json
           if git diff --cached --quiet; then
-            echo "No episode state changes to commit."
+            echo "Nothing to commit."
           else
-            git commit -m "Update Ramayana episode state"
+            git commit -m "Ramayana: advance episode"
+            git pull --rebase origin "${GITHUB_REF_NAME}" || true
             git push
-            echo "Episode state successfully saved to GitHub."
           fi
