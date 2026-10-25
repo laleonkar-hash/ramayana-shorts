@@ -81,7 +81,7 @@ def compose_portrait(path=config.PORTRAIT):
 def _request(prompt, seed):
     r = requests.post(URL.format(acc=config.CF_ACCOUNT_ID),
                       headers={"Authorization": f"Bearer {config.CF_API_TOKEN}"},
-                      json={"prompt": prompt, "steps": 8, "seed": int(seed)}, timeout=180)
+                      json={"prompt": prompt, "steps": 8}, timeout=180)   # NOTE: the REST API rejects "seed" (HTTP 400), so none is sent
     if r.status_code in (401, 403):
         raise CloudflareAuthError(f"Cloudflare rejected the token/account ({r.status_code}): {r.text[:300]}\n"
                                   "Check the CF_ACCOUNT_ID and CF_API_TOKEN secrets (token needs Workers AI permission).")
