@@ -91,6 +91,47 @@ class GeminiUnavailable(RuntimeError):
     """Every writer (all Gemini models + the Cloudflare fallback) failed. Retrying the whole script would only waste quota."""
 
 
+_MODELS = {"list": None}
+_SKIP = ("image", "tts", "audio", "live", "native", "embedding", "robotics", "computer", "vision", "aqa", "learnlm")
+
+
+def _version_key(name):
+    nums = re.findall(r"\d+(?:\.\d+)?", name)
+    return float(nums[0]) if nums else 0.0
+
+
+def _model_order(client):
+    """Models to try, in order. Asks Google which text models exist RIGHT NOW, so a retired/renamed name can never
+    break the run again: your configured models come first (only if they still exist), then any other newer or older
+    Gemini flash text models that Google offers. If the list call fails, the configured list is used as-is."""
+    if _MODELS["list"] is not None:
+        return _MODELS["list"]
+    configured = list(config.GEMINI_MODELS)
+    order = configured
+    try:
+        found = []
+        for m in client.models.list():
+            name = (getattr(m, "name", "") or "").replace("models/", "")
+            actions = getattr(m, "supported_actions", None) or []
+            if not name.startswith("gemini-") or "flash" not in name or any(k in name for k in _SKIP):
+                continue
+            if actions and "generateContent" not in actions:
+                continue
+            found.append(name)
+        if found:
+            kept = [m for m in configured if m in found]
+            extra = sorted((m for m in found if m not in kept), key=_version_key, reverse=True)
+            order = kept + extra[:4]
+            dropped = [m for m in configured if m not in found]
+            if dropped:
+                print("   Not offered by Google any more, skipped:", ", ".join(dropped))
+            print("   Gemini models to try:", ", ".join(order))
+    except Exception as e:  # noqa: BLE001
+        print("   (could not list Gemini models, using the configured list):", str(e)[:120])
+    _MODELS["list"] = order
+    return order
+
+
 def _retry_seconds(msg, default=30):
     m = re.search(r"retry in ([\d.]+)\s*s", msg, re.I) or re.search(r"retryDelay\W+(\d+)", msg)
     return min(float(m.group(1)) + 2, 60) if m else default
@@ -130,17 +171,19 @@ def _ask_cloudflare(prompt, temperature):
     return _extract_json(text)
 
 
-def _ask_json(prompt, temperature=0.9):
-    """Gemini with sensible quota handling:
+def _gemini_round(prompt, temperature=0.9):
+    """One pass over all Gemini models. Returns the parsed JSON, or None if every model failed.
+       Gemini with sensible quota handling:
        - daily quota used up (429 PerDay)      -> skip that model at once (no pointless retries)
        - per-minute limit (429)                -> wait the time Google asks, retry once
        - 503/500 overload                      -> short back-off, up to 3 tries
        - 404 / retired model                   -> next model
-       then Cloudflare text model, then GeminiUnavailable."""
+       (the caller adds extra rounds for overload, then the Cloudflare text model)."""
     from google.genai import types
     client = _client()
     last = None
-    for model in config.GEMINI_MODELS:
+    _STATE["overloaded"] = False
+    for model in _model_order(client):
         if model in _DEAD:
             continue
         tries = 0
@@ -170,12 +213,28 @@ def _ask_json(prompt, temperature=0.9):
                     print(f"   -> per-minute limit, waiting {wait:.0f}s")
                     time.sleep(wait)
                 elif any(k in msg for k in ("503", "500", "502", "504", "UNAVAILABLE", "INTERNAL", "DEADLINE")) or "timed out" in low:
+                    _STATE["overloaded"] = True          # Google-side spike: worth another round later
                     time.sleep(5 * 2 ** (tries - 1))
                 elif isinstance(e, (ValueError, json.JSONDecodeError)):
                     time.sleep(2)                        # bad/empty JSON: one more go, same model
                 else:
                     _DEAD.add(model)
                     break                                # 404 retired model, 400, 403 ... -> next model
+    _STATE["last"] = last
+    return None
+
+
+def _ask_json(prompt, temperature=0.9):
+    """Gemini rounds (with a long pause between rounds while Google is overloaded) -> Cloudflare text model -> GeminiUnavailable."""
+    for rnd in range(1, config.OVERLOAD_ROUNDS + 1):
+        out = _gemini_round(prompt, temperature)
+        if out is not None:
+            return out
+        if not _STATE.get("overloaded") or rnd == config.OVERLOAD_ROUNDS:
+            break                                        # quota/retired models: waiting will not help
+        print(f"   Gemini is overloaded (round {rnd}/{config.OVERLOAD_ROUNDS}) -> waiting {config.OVERLOAD_WAIT}s, then asking again")
+        time.sleep(config.OVERLOAD_WAIT)
+    last = _STATE.get("last")
     print("   All Gemini models unavailable -> trying the Cloudflare text model")
     try:
         out = _ask_cloudflare(prompt, temperature)
