@@ -25,7 +25,7 @@ concurrency:
 jobs:
   create-and-upload:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -58,6 +58,7 @@ jobs:
           EPISODE_OVERRIDE: ${{ inputs.episode }}
           UPLOAD_PRIVACY: ${{ vars.UPLOAD_PRIVACY }}
           GEMINI_MODELS: ${{ vars.GEMINI_MODELS }}
+          PYTHONUNBUFFERED: "1"          # show the log live while the step runs
         run: python main.py
 
       - name: Keep a copy of the video for review
