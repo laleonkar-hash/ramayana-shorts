@@ -224,9 +224,9 @@ def _gemini_round(prompt, temperature=0.9):
     return None
 
 
-def _ask_json(prompt, temperature=0.9):
+def _ask_json(prompt, temperature=0.9, rounds=None):
     """Gemini rounds (with a long pause between rounds while Google is overloaded) -> Cloudflare text model -> GeminiUnavailable."""
-    rounds = int(getattr(config, "OVERLOAD_ROUNDS", 4))      # getattr: works even with an older config.py
+    rounds = int(rounds or getattr(config, "OVERLOAD_ROUNDS", 4))      # getattr: works even with an older config.py
     wait = int(getattr(config, "OVERLOAD_WAIT", 90))
     for rnd in range(1, rounds + 1):
         out = _gemini_round(prompt, temperature)
@@ -418,7 +418,7 @@ def generate_script(episode, previous, following):
                     if _STATE["fallback"]:
                         raise RuntimeError("fallback writer was used; not spending more requests")
                     print("Director pass (hook, facts, Marathi, picture match) ...")
-                    fixed = normalize_script(_ask_json(_director_prompt(episode, script), 0.6))
+                    fixed = normalize_script(_ask_json(_director_prompt(episode, script), 0.6, rounds=1))   # optional polish: never wait for it
                     if not validate_script(fixed):
                         script = fixed
                     else:
