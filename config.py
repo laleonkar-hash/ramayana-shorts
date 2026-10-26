@@ -28,7 +28,7 @@ MUSIC_DIR = os.path.join("assets", "music")          # optional: drop one licens
 # Each model has its OWN daily quota, so more models = more free requests. Unknown/retired names are skipped instantly.
 GEMINI_MODELS = [m.strip() for m in env(
     "GEMINI_MODELS",
-    "gemini-3.8-flash,gemini-3.8-flash-lite,gemini-3.6-flash,gemini-3.5-flash,gemini-2.5-flash-lite").split(",") if m.strip()]
+    "gemini-3.8-flash,gemini-3.6-flash,gemini-3.5-flash,gemini-3.5-flash-lite,gemini-2.5-flash").split(",") if m.strip()]
 # Last-resort writer if every Gemini model is out of quota / down (uses the same Cloudflare token as the images)
 CF_TEXT_MODEL = env("CF_TEXT_MODEL", "@cf/google/gemma-3-12b-it")
 DIRECTOR_PASS = env("DIRECTOR_PASS", "true").lower() == "true"   # 2nd Gemini call that polishes the script (set false to save quota)
