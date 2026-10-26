@@ -226,14 +226,16 @@ def _gemini_round(prompt, temperature=0.9):
 
 def _ask_json(prompt, temperature=0.9):
     """Gemini rounds (with a long pause between rounds while Google is overloaded) -> Cloudflare text model -> GeminiUnavailable."""
-    for rnd in range(1, config.OVERLOAD_ROUNDS + 1):
+    rounds = int(getattr(config, "OVERLOAD_ROUNDS", 4))      # getattr: works even with an older config.py
+    wait = int(getattr(config, "OVERLOAD_WAIT", 90))
+    for rnd in range(1, rounds + 1):
         out = _gemini_round(prompt, temperature)
         if out is not None:
             return out
-        if not _STATE.get("overloaded") or rnd == config.OVERLOAD_ROUNDS:
+        if not _STATE.get("overloaded") or rnd == rounds:
             break                                        # quota/retired models: waiting will not help
-        print(f"   Gemini is overloaded (round {rnd}/{config.OVERLOAD_ROUNDS}) -> waiting {config.OVERLOAD_WAIT}s, then asking again")
-        time.sleep(config.OVERLOAD_WAIT)
+        print(f"   Gemini is overloaded (round {rnd}/{rounds}) -> waiting {wait}s, then asking again")
+        time.sleep(wait)
     last = _STATE.get("last")
     print("   All Gemini models unavailable -> trying the Cloudflare text model")
     try:
