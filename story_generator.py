@@ -80,7 +80,12 @@ def _client():
     if not config.GEMINI_API_KEY:
         raise RuntimeError("GEMINI_API_KEY is missing.")
     from google import genai
-    return genai.Client(api_key=config.GEMINI_API_KEY)
+    from google.genai import types
+    timeout_ms = int(getattr(config, "GEMINI_TIMEOUT", 150)) * 1000      # a request Google never answers is abandoned after this
+    try:
+        return genai.Client(api_key=config.GEMINI_API_KEY, http_options=types.HttpOptions(timeout=timeout_ms))
+    except Exception:  # noqa: BLE001  (very old SDK without HttpOptions)
+        return genai.Client(api_key=config.GEMINI_API_KEY)
 
 
 _DEAD = set()          # models that are out of quota / retired during THIS run: never asked again
@@ -186,6 +191,9 @@ def _gemini_round(prompt, temperature=0.9):
     for model in _model_order(client):
         if model in _DEAD:
             continue
+        if time.monotonic() > _STATE.get("deadline", float("inf")):
+            print("   Gemini time budget used up -> moving on")
+            break
         tries = 0
         while tries < 3:
             tries += 1
@@ -212,7 +220,13 @@ def _gemini_round(prompt, temperature=0.9):
                     wait = _retry_seconds(msg)
                     print(f"   -> per-minute limit, waiting {wait:.0f}s")
                     time.sleep(wait)
-                elif any(k in msg for k in ("503", "500", "502", "504", "UNAVAILABLE", "INTERNAL", "DEADLINE")) or "timed out" in low:
+                elif "timeout" in type(e).__name__.lower() or "timeout" in low or "timed out" in low:
+                    _STATE["overloaded"] = True
+                    print("   -> Gemini did not answer in time (overloaded)")
+                    if tries >= 2:
+                        break
+                    time.sleep(5)
+                elif any(k in msg for k in ("503", "500", "502", "504", "UNAVAILABLE", "INTERNAL", "DEADLINE")):
                     _STATE["overloaded"] = True          # Google-side spike: worth another round later
                     time.sleep(5 * 2 ** (tries - 1))
                 elif isinstance(e, (ValueError, json.JSONDecodeError)):
@@ -227,13 +241,14 @@ def _gemini_round(prompt, temperature=0.9):
 def _ask_json(prompt, temperature=0.9, rounds=None):
     """Gemini rounds (with a long pause between rounds while Google is overloaded) -> Cloudflare text model -> GeminiUnavailable."""
     rounds = int(rounds or getattr(config, "OVERLOAD_ROUNDS", 4))      # getattr: works even with an older config.py
+    _STATE["deadline"] = time.monotonic() + int(getattr(config, "GEMINI_BUDGET", 900))   # max 15 min of Gemini per script
     wait = int(getattr(config, "OVERLOAD_WAIT", 90))
     for rnd in range(1, rounds + 1):
         out = _gemini_round(prompt, temperature)
         if out is not None:
             return out
-        if not _STATE.get("overloaded") or rnd == rounds:
-            break                                        # quota/retired models: waiting will not help
+        if not _STATE.get("overloaded") or rnd == rounds or time.monotonic() > _STATE["deadline"]:
+            break                                        # quota/retired models, or out of time: waiting will not help
         print(f"   Gemini is overloaded (round {rnd}/{rounds}) -> waiting {wait}s, then asking again")
         time.sleep(wait)
     last = _STATE.get("last")
