@@ -249,24 +249,41 @@ def _ask_json(prompt, temperature=0.9, rounds=None):
 
 
 # ============================================================ prompts
-def _script_prompt(ep, prev_title, next_title, notes=""):
+def _script_prompt(ep, prev_title, next_title, notes="", prev_story="", next_story=""):
     n = config.NUM_SCENES
     hook = HOOKS[int(ep["episode"]) % len(HOOKS)]
     ending = ENDINGS[int(ep["episode"]) % len(ENDINGS)]
     keys = ", ".join(cast.CAST_KEYS)
     teaser = f'Next episode: "{next_title}".' if next_title else "This is the latest episode; just say the story continues soon."
+    first_episode = not prev_title
+    if first_episode:
+        continuity = ("CONTINUITY: this is the FIRST episode of the series.\n"
+                      + (f'Next episode: "{next_title}" - what happens: {(next_story or next_title).rstrip('. ')}. Tease it in ONE line in the closing scene without revealing its outcome.'
+                         if next_title else "This is the latest episode; just say the story continues soon."))
+        recap_rule = ""
+    else:
+        continuity = (
+            "CONTINUITY (viewers watch this series daily and in order, so this episode must feel like the NEXT CHAPTER of ONE story, not a separate video):\n"
+            f'- The previous episode "{prev_title}" covered: {(prev_story or prev_title).rstrip(". ")}.\n'
+            "- That video ended by promising THIS episode, so pay that promise off immediately.\n"
+            "- Keep names, places, relationships and who-knows-what consistent with the previous episode.\n"
+            + (f'- Next episode "{next_title}" will cover: {(next_story or next_title).rstrip(". ")}. Tease it in ONE line in the closing scene WITHOUT revealing its outcome.'
+               if next_title else "- This is the latest episode; just say the story continues soon."))
+        recap_rule = ('- Scene 2 = RECAP: ONE short sentence, 7-12 words, starting with "मागच्या भागात", saying how the previous episode ended, so a new viewer is not lost. '
+                      "Then continue the story straight from there. The recap is spoken by the narrator and its picture shows the key moment of the previous episode.\n")
+    story_from = 3 if recap_rule else 2
+    flow = "" if first_episode else " that flows naturally out of the previous episode"
     return f"""You are the head writer of a hugely popular MARATHI YouTube Shorts channel that retells the Valmiki Ramayana as a gripping, emotional, cinematic daily series. Viewers swipe away in 2 seconds unless the first line grabs them, so every second must earn attention.
 
 EPISODE {ep['episode']}: {ep['title']}
 FACTS (source of truth, do not contradict): {ep['story']}
-Previous episode: {prev_title or 'none (this is the start of the series)'}
-{teaser}
+{continuity}
 
 Write ONE script of EXACTLY {n} scenes (about 45 seconds when spoken).
 
 STRUCTURE
 - Scene 1 = HOOK, 6-12 words, speaker "narrator" or a lively character (never a king or sage). {hook}. Never start with a greeting, a title or "आजच्या भागात".
-- Scenes 2 to {n-1}: the story as a chain of vivid moments. Each scene = one new picture and ONE idea. Escalate emotion and curiosity; hold a surprise for the second half.
+{recap_rule}- Scenes {story_from} to {n-1}: the story as a chain of vivid moments{flow}. Each scene = one new picture and ONE idea. Escalate emotion and curiosity; hold a surprise for the second half.
 - At least 4 scenes must be DIRECT SPEECH in a character's own words (first person, short and powerful), spoken by at least 2 DIFFERENT characters, and by a woman wherever the story has one (Sita, Kaikeyi, Kaushalya, Mandodari ...). Every line must really be said by the character in the "speaker" field, so the right man or woman voice is used. The rest are the narrator.
 - Scene {n} = CLOSING CARD, 14-20 words: {ending}. It must mention the next episode. Its speaker is "narrator". Do not describe any picture for it.
 
@@ -274,7 +291,7 @@ LANGUAGE RULES for the spoken "text"
 - Only Marathi in Devanagari. Natural, simple, spoken Marathi that an ordinary Maharashtrian viewer loves, warm and dramatic, not stiff or bookish.
 - No English words, no digits (write numbers in words), no emoji, no brackets, no quotation marks. Use only these punctuation marks: , . ? ! (they create natural pauses for the voice).
 - Spell names exactly: राम, सीता, लक्ष्मण, हनुमान, रावण, दशरथ, कैकेयी, कौसल्या, भरत, सुग्रीव, वाली, जटायू, विभीषण, कुंभकर्ण, इंद्रजित, मंदोदरी, शूर्पणखा, मारीच, शबरी, जनक, विश्वामित्र, अयोध्या, लंका.
-- Each normal scene: 8-16 words. Total for all scenes: 90-130 words.
+- Each normal scene: 8-16 words. Total for all scenes: 100-135 words.
 
 CONTENT RULES
 - ACCURACY IS CRITICAL. Use the FACTS above. Add a detail from your own memory ONLY if you are 100% sure it is in the Valmiki Ramayana; otherwise leave it out. Never invent who appears, who says what, numbers, places or names. Never make a god appear personally unless the FACTS say so. Do not insult any person, community or religion. Tone: reverent, emotional, heroic.
@@ -315,7 +332,7 @@ Do all of this:
 3. Make the Marathi natural, spoken, emotional and grammatically perfect. Keep speech lines short and punchy. Only Marathi Devanagari, no digits, no English, no emoji, only , . ? ! punctuation.
 4. Each "image_prompt" (ENGLISH) must show EXACTLY what that line says at that moment, with the right "characters" visible. Keep it non-violent (no blood or gore). Do not describe faces or clothes of known characters.
 5. Keep "speaker", "characters", "motion", "sfx" valid and unchanged unless a fix needs it. Title: 30-55 characters, hook first, one emoji at the end.
-6. The last scene stays the closing card (14-20 words, mentions the next episode).
+6. The last scene stays the closing card (14-20 words, mentions the next episode). If scene 2 is a recap ("मागच्या भागात ..."), keep it. The episode must flow as the next chapter of one continuous story.
 
 Return ONLY valid JSON with the same shape as the SCRIPT (title, description, tags, comment_question, attire, location, scenes)."""
 
@@ -402,11 +419,13 @@ def generate_script(episode, previous, following):
     """Write + polish the script for one episode. Retries until it passes validation."""
     prev_title = previous.get("title") if previous else ""
     next_title = following.get("title") if following else ""
+    prev_story = previous.get("story", "") if previous else ""
+    next_story = following.get("story", "") if following else ""
     notes, best, best_problems = "", None, None
     for attempt in range(1, 4):
         print(f"\nWriting script (attempt {attempt}/3) ...")
         try:
-            script = _ask_json(_script_prompt(episode, prev_title, next_title, notes), 0.9)
+            script = _ask_json(_script_prompt(episode, prev_title, next_title, notes, prev_story, next_story), 0.9)
             if not isinstance(script, dict) or "scenes" not in script:
                 raise RuntimeError("Gemini JSON has no scenes")
             script = normalize_script(script)
