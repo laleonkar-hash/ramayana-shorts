@@ -26,7 +26,7 @@ def preflight():
         raise RuntimeError(f"{config.PORTRAIT} is missing (needed for the closing card).")
     fonts = subprocess.run(["fc-list", ":lang=mr"], capture_output=True, text=True).stdout.strip()
     if not fonts:
-        raise RuntimeError("No Marathi/Devanagari font installed (apt install fonts-noto-core).")
+        raise RuntimeError("No Devanagari (Hindi/Marathi) font installed (apt install fonts-noto-core).")
     for tool in ("ffmpeg", "ffprobe"):
         if not shutil.which(tool):
             raise RuntimeError(f"{tool} not found.")

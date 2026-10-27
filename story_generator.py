@@ -11,6 +11,7 @@ import time
 
 import characters as cast
 import config
+import lang
 
 MOTIONS = ["zoom_in", "zoom_out", "pan_left", "pan_right", "pan_up", "pan_down", "shake", "punch"]
 SFX = ["whoosh", "bell", "drum", "crash", "sparkle", "none"]
@@ -255,6 +256,8 @@ def _script_prompt(ep, prev_title, next_title, notes="", prev_story="", next_sto
     ending = ENDINGS[int(ep["episode"]) % len(ENDINGS)]
     keys = ", ".join(cast.CAST_KEYS)
     teaser = f'Next episode: "{next_title}".' if next_title else "This is the latest episode; just say the story continues soon."
+    pk = lang.pack()
+    L_NAME, L_UPPER, L_AUDIENCE, L_NAMES, L_TODAY = pk["name"], pk["upper"], pk["audience"], pk["names"], pk["today"]
     first_episode = not prev_title
     prev_s = (prev_story or prev_title or "").rstrip(". ")
     next_s = (next_story or next_title or "").rstrip(". ")
@@ -272,11 +275,12 @@ def _script_prompt(ep, prev_title, next_title, notes="", prev_story="", next_sto
             "- That video ended by promising THIS episode, so pay that promise off immediately.\n"
             "- Keep names, places, relationships and who-knows-what consistent with the previous episode.\n"
             "- " + next_line)
-        recap_rule = ('- Scene 2 = RECAP: ONE short sentence, 7-12 words, starting with "मागच्या भागात", saying how the previous episode ended, so a new viewer is not lost. '
+        recap_rule = ('- Scene 2 = RECAP: ONE short sentence, 7-12 words, starting with "@RECAP@", saying how the previous episode ended, so a new viewer is not lost. '
                       "Then continue the story straight from there. The recap is spoken by the narrator and its picture shows the key moment of the previous episode.\n")
+    recap_rule = recap_rule.replace("@RECAP@", pk["recap"])
     story_from = 3 if recap_rule else 2
     flow = "" if first_episode else " that flows naturally out of the previous episode"
-    return f"""You are the head writer of a hugely popular MARATHI YouTube Shorts channel that retells the Valmiki Ramayana as a gripping, emotional, cinematic daily series. Viewers swipe away in 2 seconds unless the first line grabs them, so every second must earn attention.
+    return f"""You are the head writer of a hugely popular {L_UPPER} YouTube Shorts channel that retells the Valmiki Ramayana as a gripping, emotional, cinematic daily series. Viewers swipe away in 2 seconds unless the first line grabs them, so every second must earn attention.
 
 EPISODE {ep['episode']}: {ep['title']}
 FACTS (source of truth, do not contradict): {ep['story']}
@@ -285,15 +289,15 @@ FACTS (source of truth, do not contradict): {ep['story']}
 Write ONE script of EXACTLY {n} scenes (about 45 seconds when spoken).
 
 STRUCTURE
-- Scene 1 = HOOK, 6-12 words, speaker "narrator" or a lively character (never a king or sage). {hook}. Never start with a greeting, a title or "आजच्या भागात".
+- Scene 1 = HOOK, 6-12 words, speaker "narrator" or a lively character (never a king or sage). {hook}. Never start with a greeting, a title or "{L_TODAY}".
 {recap_rule}- Scenes {story_from} to {n-1}: the story as a chain of vivid moments{flow}. Each scene = one new picture and ONE idea. Escalate emotion and curiosity; hold a surprise for the second half.
 - At least 4 scenes must be DIRECT SPEECH in a character's own words (first person, short and powerful), spoken by at least 2 DIFFERENT characters, and by a woman wherever the story has one (Sita, Kaikeyi, Kaushalya, Mandodari ...). Every line must really be said by the character in the "speaker" field, so the right man or woman voice is used. The rest are the narrator.
 - Scene {n} = CLOSING CARD, 14-20 words: {ending}. It must mention the next episode. Its speaker is "narrator". Do not describe any picture for it.
 
 LANGUAGE RULES for the spoken "text"
-- Only Marathi in Devanagari. Natural, simple, spoken Marathi that an ordinary Maharashtrian viewer loves, warm and dramatic, not stiff or bookish.
+- Only {L_NAME} in Devanagari. Natural, simple, spoken {L_NAME} that {L_AUDIENCE} loves, warm and dramatic, not stiff or bookish.
 - No English words, no digits (write numbers in words), no emoji, no brackets, no quotation marks. Use only these punctuation marks: , . ? ! (they create natural pauses for the voice).
-- Spell names exactly: राम, सीता, लक्ष्मण, हनुमान, रावण, दशरथ, कैकेयी, कौसल्या, भरत, सुग्रीव, वाली, जटायू, विभीषण, कुंभकर्ण, इंद्रजित, मंदोदरी, शूर्पणखा, मारीच, शबरी, जनक, विश्वामित्र, अयोध्या, लंका.
+- Spell names exactly: {L_NAMES}.
 - Each normal scene: 8-16 words. Total for all scenes: 100-135 words.
 
 CONTENT RULES
@@ -307,14 +311,15 @@ PICTURES: for every scene except the last, give "image_prompt" in ENGLISH: ONE c
 "motion": one of {', '.join(MOTIONS)} (shake for crashes and fights, punch for shocks and the hook, pans for journeys, zoom_in for emotion).
 "sfx": one of {', '.join(SFX)} (use none on about half of the scenes; bell for divine moments, drum for tension, crash for fights, whoosh for flying, sparkle for miracles).
 
-TITLE: Marathi, 30-55 characters, curiosity hook first, ends with exactly one fitting emoji. Do not put the words episode or भाग in it.
+TITLE: {L_NAME}, 30-55 characters, curiosity hook first, ends with exactly one fitting emoji. Do not put the words episode or भाग in it.
 {notes}
 Return ONLY valid JSON of exactly this shape:
 {{
   "title": "...",
-  "description": "2-3 Marathi sentences for the YouTube description",
-  "tags": ["10 to 12 short search tags, mixing Marathi and English, e.g. Ramayana, रामायण, Lord Rama"],
-  "comment_question": "one simple Marathi question for viewers, max 12 words",
+  "description": "2-3 {L_NAME} sentences for the YouTube description, naturally including the words Ramayan and Shri Ram",
+  "tags": ["10 to 12 short search tags people really search for, mixing {L_NAME} and English, e.g. Ramayan, रामायण, Lord Rama"],
+  "comment_question": "one simple {L_NAME} question for viewers, max 12 words",
+  "teaser": "5-8 {L_NAME} words hinting what the NEXT episode is about, without spoilers (empty if there is no next episode)",
   "attire": "palace | forest | war",
   "location": "ENGLISH: one concrete visual setting that stays consistent through the episode",
   "scenes": [{{"speaker": "...", "text": "...", "characters": ["..."], "image_prompt": "...", "motion": "...", "sfx": "..."}}]
@@ -322,7 +327,10 @@ Return ONLY valid JSON of exactly this shape:
 
 
 def _director_prompt(ep, script):
-    return f"""You are the director and final editor of a Marathi YouTube Shorts series on the Valmiki Ramayana. Improve the script below WITHOUT changing the number or order of scenes.
+    pk = lang.pack()
+    L_NAME = pk["name"]
+    L_RECAP = pk["recap"]
+    return f"""You are the director and final editor of a {L_NAME} YouTube Shorts series on the Valmiki Ramayana. Improve the script below WITHOUT changing the number or order of scenes.
 
 FACTS (source of truth): {ep['story']}
 
@@ -332,12 +340,12 @@ SCRIPT:
 Do all of this:
 1. Scene 1 must be an irresistible hook within 2 seconds of speech. If it is weak, rewrite it.
 2. Fix any factual mistake against the FACTS and the Valmiki Ramayana (remove any detail you are not sure about; no god may appear personally unless the FACTS say so); fix contradictions; make every scene follow from the previous one.
-3. Make the Marathi natural, spoken, emotional and grammatically perfect. Keep speech lines short and punchy. Only Marathi Devanagari, no digits, no English, no emoji, only , . ? ! punctuation.
+3. Make the {L_NAME} natural, spoken, emotional and grammatically perfect. Keep speech lines short and punchy. Only {L_NAME} in Devanagari, no digits, no English, no emoji, only , . ? ! punctuation.
 4. Each "image_prompt" (ENGLISH) must show EXACTLY what that line says at that moment, with the right "characters" visible. Keep it non-violent (no blood or gore). Do not describe faces or clothes of known characters.
 5. Keep "speaker", "characters", "motion", "sfx" valid and unchanged unless a fix needs it. Title: 30-55 characters, hook first, one emoji at the end.
-6. The last scene stays the closing card (14-20 words, mentions the next episode). If scene 2 is a recap ("मागच्या भागात ..."), keep it. The episode must flow as the next chapter of one continuous story.
+6. The last scene stays the closing card (14-20 words, mentions the next episode). If scene 2 is a recap ("{L_RECAP} ..."), keep it. The episode must flow as the next chapter of one continuous story.
 
-Return ONLY valid JSON with the same shape as the SCRIPT (title, description, tags, comment_question, attire, location, scenes)."""
+Return ONLY valid JSON with the same shape as the SCRIPT (title, description, tags, comment_question, teaser, attire, location, scenes)."""
 
 
 # ============================================================ validation / cleanup
@@ -385,6 +393,7 @@ def normalize_script(script):
     script["description"] = " ".join(str(script.get("description", "")).split())
     script["comment_question"] = " ".join(str(script.get("comment_question", "")).split())
     script["location"] = " ".join(str(script.get("location", "")).split())
+    script["teaser"] = " ".join(str(script.get("teaser", "") or "").split())
     return script
 
 
@@ -395,7 +404,7 @@ def validate_script(script):
     if not isinstance(scenes, list) or len(scenes) != config.NUM_SCENES:
         return [f"need exactly {config.NUM_SCENES} scenes, got {len(scenes) if isinstance(scenes, list) else 'none'}"]
     if not _DEV.search(script.get("title", "")):
-        problems.append("title must be Marathi (Devanagari)")
+        problems.append(f"title must be {lang.pack()['name']} (Devanagari)")
     total = 0
     for i, sc in enumerate(scenes, 1):
         t = sc.get("text", "")
@@ -407,7 +416,7 @@ def validate_script(script):
         if words > 24:
             problems.append(f"scene {i}: text too long ({words} words)")
         if letters_dev < 5 or letters_lat > 0.05 * max(letters_dev, 1):
-            problems.append(f"scene {i}: must be Marathi Devanagari only")
+            problems.append(f"scene {i}: must be {lang.pack()['name']} in Devanagari only")
         if _BAD.search(t):
             problems.append(f"scene {i}: mentions AI/prompt/script")
         if i < len(scenes) and len(sc.get("image_prompt", "")) < 15:
@@ -439,7 +448,7 @@ def generate_script(episode, previous, following):
                         raise RuntimeError("DIRECTOR_PASS=false")
                     if _STATE["fallback"]:
                         raise RuntimeError("fallback writer was used; not spending more requests")
-                    print("Director pass (hook, facts, Marathi, picture match) ...")
+                    print("Director pass (hook, facts, language, picture match) ...")
                     fixed = normalize_script(_ask_json(_director_prompt(episode, script), 0.6, rounds=1))   # optional polish: never wait for it
                     if not validate_script(fixed):
                         script = fixed
@@ -447,7 +456,7 @@ def generate_script(episode, previous, following):
                         print("   director output failed validation -> keeping first draft")
                 except Exception as e:  # noqa: BLE001
                     print("   director pass skipped:", str(e)[:150])   # the first draft is already valid
-                script["teaser"] = next_title
+                script["teaser"] = script.get("teaser") or ""
                 return script
             print("   problems:", "; ".join(problems))
             if best is None or len(problems) < len(best_problems):
@@ -461,7 +470,7 @@ def generate_script(episode, previous, following):
     if best is not None and not any(("exactly" in p or "title" in p or "Devanagari" in p or "AI/prompt" in p)
                                     for p in best_problems):
         print("Using best near-miss script. Remaining issues:", best_problems)
-        best["teaser"] = next_title
+        best["teaser"] = best.get("teaser") or ""
         return best
     raise RuntimeError("Could not produce a valid script after 3 attempts.")
 

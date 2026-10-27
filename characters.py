@@ -95,6 +95,11 @@ VOICES = {
     "queen":    ("mr-IN-AarohiNeural",  "-2%", "+0Hz", "F8A5FF", -0.8),   # Kaikeyi, Kaushalya: mature, firm
 }
 
+# the table above is written with the Marathi voice names; swap in the voices of the chosen language
+import lang as _lang
+_P = _lang.pack()
+VOICES = {k: ((_P["female"] if v[0].startswith("mr-IN-Aarohi") else _P["male"]),) + tuple(v[1:]) for k, v in VOICES.items()}
+
 CAST_KEYS = sorted(CHARACTERS)
 
 

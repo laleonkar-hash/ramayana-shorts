@@ -7,6 +7,8 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
 import config
+import lang
+from collections import Counter
 
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 
@@ -22,20 +24,55 @@ def _service(scopes=None):
     return build("youtube", "v3", credentials=creds)
 
 
+CHAR_TAGS = {   # characters that appear in the episode -> the hashtags people actually search
+    "sita": "#MataSita", "lakshmana": "#Laxman", "hanuman": "#Hanuman #BajrangBali", "ravana": "#Ravan",
+    "bharata": "#Bharat", "dasharatha": "#Dashrath", "vishwamitra": "#Vishwamitra", "sugriva": "#Sugriv",
+    "vali": "#Vali", "jatayu": "#Jatayu", "vibhishana": "#Vibhishan", "kumbhakarna": "#Kumbhkaran",
+    "indrajit": "#Meghnad", "mandodari": "#Mandodari", "kaikeyi": "#Kaikeyi", "kaushalya": "#Kaushalya",
+    "shabari": "#Shabari", "angad": "#Angad", "jambavan": "#Jambavan", "janaka": "#Janak",
+    "surpanakha": "#Surpanakha", "maricha": "#Maricha", "guha": "#Nishadraj", "tara": "#Tara",
+}
+
+
+def build_hashtags(script):
+    """Channel hashtags + up to 3 character hashtags of THIS episode. Max 13 (YouTube ignores ALL hashtags above 15).
+    The first three are shown above the title, so they are the strongest ones."""
+    tags = list(lang.pack()["hashtags"])
+    counts = Counter()
+    for sc in script.get("scenes", []):
+        for c in sc.get("characters", []) or []:
+            counts[c] += 1
+        if sc.get("speaker") not in (None, "", "narrator"):
+            counts[sc["speaker"]] += 1
+    extra = []
+    for key, _ in counts.most_common():
+        if key in CHAR_TAGS:
+            extra += CHAR_TAGS[key].split()
+        if len(extra) >= 3:
+            break
+    for t in extra:
+        if t not in tags:
+            tags.append(t)
+    return tags[:13]
+
+
 def make_metadata(script, episode_number):
-    suffix = f" | रामायण भाग {episode_number} #Shorts"
+    pk = lang.pack()
+    suffix = pk["title_suffix"].format(n=episode_number)
     title = script["title"][: 100 - len(suffix)].rstrip() + suffix
     parts = []
     if script.get("comment_question"):
         parts.append(script["comment_question"])
     parts.append(script["description"])
+    parts.append(pk["seo_line"].format(n=episode_number))
     if script.get("teaser"):
-        parts.append(f"पुढील भाग: {script['teaser']}")
-    parts.append("रोज दोन नवीन रामायण कथा शॉर्ट्स. चॅनेल सबस्क्राईब करा आणि जय श्री राम लिहा! 🙏")
-    parts.append(config.CHANNEL_HASHTAGS)
-    parts.append("या व्हिडिओमधील चित्रे आणि आवाज AI च्या मदतीने तयार केले आहेत.")
+        parts.append(pk["next_label"] + " " + script["teaser"])
+    parts.append(pk["cta"])
+    parts.append(" ".join(build_hashtags(script)))
+    parts.append(pk["ai_note"])
+    wanted = list(script.get("tags", [])) + pk["tags"] + [f"Ramayan episode {episode_number}", f"रामायण भाग {episode_number}"]
     tags, total = [], 0
-    for t in script.get("tags", []) + ["Ramayana", "रामायण", "Marathi", "मराठी", "Shorts", "Lord Rama"]:
+    for t in wanted:
         if t not in tags and total + len(t) + 1 < 450:
             tags.append(t)
             total += len(t) + 1
@@ -49,7 +86,7 @@ def upload_video(video_path, script, episode_number, thumb_path=None):
     title, description, tags = make_metadata(script, episode_number)
     body = {
         "snippet": {"title": title, "description": description, "tags": tags, "categoryId": config.CATEGORY_ID,
-                    "defaultLanguage": "mr", "defaultAudioLanguage": "mr"},
+                    "defaultLanguage": lang.pack()["code"], "defaultAudioLanguage": lang.pack()["code"]},
         "status": {"privacyStatus": config.PRIVACY, "selfDeclaredMadeForKids": config.MADE_FOR_KIDS,
                    "containsSyntheticMedia": True, "embeddable": True, "publicStatsViewable": True},
     }

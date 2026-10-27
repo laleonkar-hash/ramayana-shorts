@@ -16,6 +16,11 @@ YOUTUBE_CLIENT_ID = env("YOUTUBE_CLIENT_ID")
 YOUTUBE_CLIENT_SECRET = env("YOUTUBE_CLIENT_SECRET")
 YOUTUBE_REFRESH_TOKEN = env("YOUTUBE_REFRESH_TOKEN")
 
+# ---------------------------------------------------------------- language
+LANGUAGE = env("LANGUAGE", "hi").lower()            # "hi" = Hindi (default, biggest audience)  |  "mr" = Marathi
+if LANGUAGE not in ("hi", "mr"):
+    LANGUAGE = "hi"
+
 # ---------------------------------------------------------------- files
 EPISODES_FILE = "ramayana_episodes.json"
 STATE_FILE = "episode_state.json"
