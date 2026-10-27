@@ -256,19 +256,22 @@ def _script_prompt(ep, prev_title, next_title, notes="", prev_story="", next_sto
     keys = ", ".join(cast.CAST_KEYS)
     teaser = f'Next episode: "{next_title}".' if next_title else "This is the latest episode; just say the story continues soon."
     first_episode = not prev_title
+    prev_s = (prev_story or prev_title or "").rstrip(". ")          # computed here: no quotes inside f-string braces (Python 3.11 safe)
+    next_s = (next_story or next_title or "").rstrip(". ")
+    if next_title:
+        next_line = f'Next episode "{next_title}" - what happens: {next_s}. Tease it in ONE line in the closing scene WITHOUT revealing its outcome.'
+    else:
+        next_line = "This is the latest episode; just say the story continues soon."
     if first_episode:
-        continuity = ("CONTINUITY: this is the FIRST episode of the series.\n"
-                      + (f'Next episode: "{next_title}" - what happens: {(next_story or next_title).rstrip('. ')}. Tease it in ONE line in the closing scene without revealing its outcome.'
-                         if next_title else "This is the latest episode; just say the story continues soon."))
+        continuity = "CONTINUITY: this is the FIRST episode of the series.\n" + next_line
         recap_rule = ""
     else:
         continuity = (
             "CONTINUITY (viewers watch this series daily and in order, so this episode must feel like the NEXT CHAPTER of ONE story, not a separate video):\n"
-            f'- The previous episode "{prev_title}" covered: {(prev_story or prev_title).rstrip(". ")}.\n'
+            f'- The previous episode "{prev_title}" covered: {prev_s}.\n'
             "- That video ended by promising THIS episode, so pay that promise off immediately.\n"
             "- Keep names, places, relationships and who-knows-what consistent with the previous episode.\n"
-            + (f'- Next episode "{next_title}" will cover: {(next_story or next_title).rstrip(". ")}. Tease it in ONE line in the closing scene WITHOUT revealing its outcome.'
-               if next_title else "- This is the latest episode; just say the story continues soon."))
+            "- " + next_line)
         recap_rule = ('- Scene 2 = RECAP: ONE short sentence, 7-12 words, starting with "मागच्या भागात", saying how the previous episode ended, so a new viewer is not lost. '
                       "Then continue the story straight from there. The recap is spoken by the narrator and its picture shows the key moment of the previous episode.\n")
     story_from = 3 if recap_rule else 2
