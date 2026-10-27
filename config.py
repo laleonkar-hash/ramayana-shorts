@@ -52,6 +52,10 @@ MADE_FOR_KIDS = env("MADE_FOR_KIDS", "false").lower() == "true"
 CATEGORY_ID = "24"                                     # Entertainment
 CHANNEL_HASHTAGS = "#रामायण #Ramayana #JaiShreeRam #श्रीराम #मराठी #Shorts"
 
+# ---- sound (kept natural: the synthesized effects and the pitch shifting both sounded "cartoon")
+SFX_ENABLED = env("SFX_ENABLED", "false").lower() == "true"                   # whoosh / sparkle / crash / drum / bell effects
+VOICE_PITCH_SHIFT = env("VOICE_PITCH_SHIFT", "false").lower() == "true"       # tiny per-character pitch shift in FFmpeg
+
 FIRST_COMMENT = env("FIRST_COMMENT", "true").lower() == "true"   # channel posts the episode question as the first comment
 DRY_RUN = env("DRY_RUN", "false").lower() == "true"    # build the video, do NOT upload, do NOT advance the episode
 EPISODE_OVERRIDE = env("EPISODE_OVERRIDE")             # build one specific episode (never changes the saved state)

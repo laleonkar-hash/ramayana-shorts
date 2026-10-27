@@ -50,7 +50,7 @@ def build(scenes, outdir, episode_number):
               f"zoompan=z='{z}':x='{x}':y='{y}':d={frames}:s={W}x{H}:fps={FPS},format=yuv420p[v]")
         cmd = ["ffmpeg", "-y", "-i", sc["image"], "-i", sc["audio"]]
         sfx = sc.get("sfx", "none")
-        if sfx in effects.SFX:
+        if config.SFX_ENABLED and sfx in effects.SFX:
             cmd += ["-i", effects.make_sfx(sfx, outdir)]
             af = (f"[1:a]apad=pad_dur={PAD}[a0];[2:a]volume={effects.SFX_GAIN[sfx]}[s];"
                   f"[a0][s]amix=inputs=2:duration=first:normalize=0[a]")
@@ -62,7 +62,7 @@ def build(scenes, outdir, episode_number):
                 "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k", clip]
         effects.run(cmd, outdir)
         clips.append(clip)
-        print(f"   clip {i + 1}/{len(scenes)} rendered ({sc['motion']}, sfx={sfx})")
+        print(f"   clip {i + 1}/{len(scenes)} rendered ({sc['motion']}, sfx={sfx if config.SFX_ENABLED else 'off'})")
 
     with open(os.path.join(outdir, "list.txt"), "w") as f:
         f.write("".join(f"file '{c}'\n" for c in clips))

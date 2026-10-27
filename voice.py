@@ -5,6 +5,7 @@ import subprocess
 import time
 
 import characters as cast
+import config
 
 
 def _tts(text, path, voice, rate, pitch):
@@ -25,7 +26,7 @@ def _trim(src, dst, semitones=0.0):
     """Remove leading/trailing silence (edge-tts adds ~0.3 s of air at both ends)."""
     af = ("silenceremove=start_periods=1:start_threshold=-55dB:start_silence=0.09,areverse,"
           "silenceremove=start_periods=1:start_threshold=-55dB:start_silence=0.15,areverse")
-    if abs(semitones) > 0.01:
+    if config.VOICE_PITCH_SHIFT and abs(semitones) > 0.01:
         f = 2 ** (semitones / 12.0)           # >1 = higher/younger/smaller voice, <1 = lower/older/bigger voice
         af += f",asetrate={44100 * f:.1f},aresample=44100,atempo={1 / f:.6f}"
     p = subprocess.run(["ffmpeg", "-y", "-i", src, "-af", af, "-ar", "44100", "-ac", "2", dst],
