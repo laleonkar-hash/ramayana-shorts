@@ -85,8 +85,8 @@ def main():
 
     total = sum(s["dur"] + config.SCENE_PAD for s in scenes)
     print(f"\nTotal narration: {total:.1f}s")
-    if not 20 <= total <= 120:
-        raise RuntimeError(f"Video length {total:.1f}s is outside the safe range (20-120s). Nothing uploaded.")
+    if not 20 <= total <= 170:
+        raise RuntimeError(f"Video length {total:.1f}s is outside the safe range (20-170s). Nothing uploaded.")
 
     print("\n3/5 Rendering video")
     final = video_creator.build(scenes, outdir, number)
