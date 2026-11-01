@@ -252,6 +252,10 @@ def _ask_json(prompt, temperature=0.9, rounds=None):
 # ============================================================ prompts
 def _script_prompt(ep, prev_title, next_title, notes="", prev_story="", next_story=""):
     n = config.NUM_SCENES
+    secs = int(round(n * 6.4))                 # spoken Hindi/Marathi runs ~2.4 words/second
+    sc_lo, sc_hi = 12, 22                      # words per normal scene
+    tot_lo, tot_hi = n * 13, n * 18            # words in the whole script
+    direct = max(5, n // 3)                    # scenes spoken by the characters themselves
     hook = HOOKS[int(ep["episode"]) % len(HOOKS)]
     ending = ENDINGS[int(ep["episode"]) % len(ENDINGS)]
     keys = ", ".join(cast.CAST_KEYS)
@@ -286,19 +290,20 @@ EPISODE {ep['episode']}: {ep['title']}
 FACTS (source of truth, do not contradict): {ep['story']}
 {continuity}
 
-Write ONE script of EXACTLY {n} scenes (about 45 seconds when spoken).
+Write ONE script of EXACTLY {n} scenes (about {secs} seconds when spoken). The viewer must get the COMPLETE story of this episode: it has to feel like a full, satisfying chapter, never a rushed summary.
 
 STRUCTURE
 - Scene 1 = HOOK, 6-12 words, speaker "narrator" or a lively character (never a king or sage). {hook}. Never start with a greeting, a title or "{L_TODAY}".
-{recap_rule}- Scenes {story_from} to {n-1}: the story as a chain of vivid moments{flow}. Each scene = one new picture and ONE idea. Escalate emotion and curiosity; hold a surprise for the second half.
-- At least 4 scenes must be DIRECT SPEECH in a character's own words (first person, short and powerful), spoken by at least 2 DIFFERENT characters, and by a woman wherever the story has one (Sita, Kaikeyi, Kaushalya, Mandodari ...). Every line must really be said by the character in the "speaker" field, so the right man or woman voice is used. The rest are the narrator.
-- Scene {n} = CLOSING CARD, 14-20 words: {ending}. It must mention the next episode. Its speaker is "narrator". Do not describe any picture for it.
+{recap_rule}- Scenes {story_from} to {n-1}: the story as a chain of vivid moments{flow}. Each scene = one new picture and ONE idea, told in one or two short sentences. Build it like a real story: a quick setup, rising tension, one clear turning point or climax, then an emotional payoff. Hold a surprise for the second half.
+- At least {direct} scenes must be DIRECT SPEECH in a character's own words (first person, short and powerful), spoken by at least 2 DIFFERENT characters, and by a woman wherever the story has one (Sita, Kaikeyi, Kaushalya, Mandodari ...). Every line must really be said by the character in the "speaker" field, so the right man or woman voice is used. The rest are the narrator.
+- COMPLETENESS: cover EVERY event listed in the FACTS, in the order they happen and with cause and effect, so a viewer who sees only this video understands the whole episode. Add feelings, small human details and short powerful dialogue; vary the rhythm; no filler and no repeated phrases. Stop where the FACTS stop: do NOT narrate events of the NEXT episode, end on the moment that leads into it.
+- Scene {n} = CLOSING CARD, 14-22 words: {ending}. It must mention the next episode. Its speaker is "narrator". Do not describe any picture for it.
 
 LANGUAGE RULES for the spoken "text"
 - Only {L_NAME} in Devanagari. Natural, simple, spoken {L_NAME} that {L_AUDIENCE} loves, warm and dramatic, not stiff or bookish.
 - No English words, no digits (write numbers in words), no emoji, no brackets, no quotation marks. Use only these punctuation marks: , . ? ! (they create natural pauses for the voice).
 - Spell names exactly: {L_NAMES}.
-- Each normal scene: 8-16 words. Total for all scenes: 100-135 words.
+- Each normal scene: {sc_lo}-{sc_hi} words. Total for all scenes: {tot_lo}-{tot_hi} words (the voice speaks about 2.4 words per second, so stay inside this range).
 
 CONTENT RULES
 - ACCURACY IS CRITICAL. Use the FACTS above. Add a detail from your own memory ONLY if you are 100% sure it is in the Valmiki Ramayana; otherwise leave it out. Never invent who appears, who says what, numbers, places or names. Never make a god appear personally unless the FACTS say so. Do not insult any person, community or religion. Tone: reverent, emotional, heroic.
@@ -344,6 +349,7 @@ Do all of this:
 4. Each "image_prompt" (ENGLISH) must show EXACTLY what that line says at that moment, with the right "characters" visible. Keep it non-violent (no blood or gore). Do not describe faces or clothes of known characters.
 5. Keep "speaker", "characters", "motion", "sfx" valid and unchanged unless a fix needs it. Title: 30-55 characters, hook first, one emoji at the end.
 6. The last scene stays the closing card (14-20 words, mentions the next episode). If scene 2 is a recap ("{L_RECAP} ..."), keep it. The episode must flow as the next chapter of one continuous story.
+7. Keep the script FULL: every event of the FACTS is told in order, each normal scene is one or two short sentences of about 12-22 words, and nothing from the NEXT episode is narrated. Never shorten the script.
 
 Return ONLY valid JSON with the same shape as the SCRIPT (title, description, tags, comment_question, teaser, attire, location, scenes)."""
 
@@ -413,7 +419,7 @@ def validate_script(script):
         letters_dev, letters_lat = len(_DEV.findall(t)), len(_LAT.findall(t))
         if words < 3:
             problems.append(f"scene {i}: text too short")
-        if words > 24:
+        if words > 34:
             problems.append(f"scene {i}: text too long ({words} words)")
         if letters_dev < 5 or letters_lat > 0.05 * max(letters_dev, 1):
             problems.append(f"scene {i}: must be {lang.pack()['name']} in Devanagari only")
@@ -421,8 +427,9 @@ def validate_script(script):
             problems.append(f"scene {i}: mentions AI/prompt/script")
         if i < len(scenes) and len(sc.get("image_prompt", "")) < 15:
             problems.append(f"scene {i}: image_prompt missing")
-    if not 70 <= total <= 150:
-        problems.append(f"total spoken words {total} (need 90-130)")
+    n_sc = config.NUM_SCENES
+    if not n_sc * 10 <= total <= n_sc * 26:
+        problems.append(f"total spoken words {total} (need about {n_sc * 13}-{n_sc * 18})")
     return problems
 
 
