@@ -17,6 +17,10 @@ class CloudflareAuthError(RuntimeError):
     pass
 
 
+class CloudflareQuotaError(RuntimeError):
+    pass
+
+
 # ------------------------------------------------------------------ prompt building
 def build_prompt(scene, attire, location, safe=False, age="adult"):
     """action first (FLUX reads the start of the prompt most closely), then the fixed look of each character."""
@@ -81,10 +85,13 @@ def compose_portrait(path=config.PORTRAIT):
 def _request(prompt, seed):
     r = requests.post(URL.format(acc=config.CF_ACCOUNT_ID),
                       headers={"Authorization": f"Bearer {config.CF_API_TOKEN}"},
-                      json={"prompt": prompt, "steps": 8}, timeout=180)   # NOTE: the REST API rejects "seed" (HTTP 400), so none is sent
+                      json={"prompt": prompt, "steps": int(getattr(config, "IMAGE_STEPS", 4))}, timeout=180)   # NOTE: the REST API rejects "seed" (HTTP 400), so none is sent
     if r.status_code in (401, 403):
         raise CloudflareAuthError(f"Cloudflare rejected the token/account ({r.status_code}): {r.text[:300]}\n"
                                   "Check the CF_ACCOUNT_ID and CF_API_TOKEN secrets (token needs Workers AI permission).")
+    if r.status_code == 429 and "daily free allocation" in r.text.lower():
+        raise CloudflareQuotaError("Cloudflare's daily free quota (10,000 Neurons) is used up. It resets at 00:00 UTC "
+                                   "(05:30 AM IST). Nothing was uploaded; the same episode will be retried at the next run.")
     if r.status_code != 200:
         raise RuntimeError(f"HTTP {r.status_code}: {r.text[:200]}")
     b64 = (r.json().get("result") or {}).get("image")
@@ -106,7 +113,7 @@ def make_image(scene, attire, location, path, seed, age="adult"):
         try:
             compose(_request(prompt, seed + bump * 7919)).save(path, "JPEG", quality=93)
             return True
-        except CloudflareAuthError:
+        except (CloudflareAuthError, CloudflareQuotaError):
             raise
         except Exception as e:  # noqa: BLE001
             last = str(e)
