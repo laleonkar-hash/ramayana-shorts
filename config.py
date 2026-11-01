@@ -43,7 +43,8 @@ DIRECTOR_PASS = env("DIRECTOR_PASS", "true").lower() == "true"   # 2nd Gemini ca
 
 # ---------------------------------------------------------------- video
 WIDTH, HEIGHT, FPS = 1080, 1920, 30
-NUM_SCENES = int(env("NUM_SCENES", "9"))              # 8 picture scenes + 1 closing card  (~40-55 s)
+NUM_SCENES = int(env("NUM_SCENES", "14"))             # 13 picture scenes + 1 closing card  (~85-95 s: the FULL story of the episode)
+IMAGE_STEPS = int(env("IMAGE_STEPS", "4"))             # FLUX schnell is built for 4 steps; 8 would double the Cloudflare cost per picture
 SCENE_PAD = 0.12                                       # tiny pause after each scene -> snappy cuts
 MAX_EPISODES = int(env("MAX_EPISODES", "110"))         # after this the series restarts from episode 1
 FOREGROUND_H = 1210                                    # height of the picture inside the 9:16 frame
